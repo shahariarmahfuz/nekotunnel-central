@@ -85,7 +85,7 @@ export default function UsersPage() {
   };
 
   const installCmd = newToken
-    ? `curl -fsSL ${origin}/client/nekotunnel -o nekotunnel && chmod +x nekotunnel && sudo ./nekotunnel install 22 ${newToken} ${origin}`
+    ? `sudo curl -fsSL ${origin}/client/nekotunnel -o /usr/local/bin/nekotunnel && sudo chmod +x /usr/local/bin/nekotunnel && nekotunnel token ${newToken} ${origin} && nekotunnel tcp 22`
     : "";
 
   return (
@@ -123,9 +123,9 @@ export default function UsersPage() {
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs text-slate-700 dark:text-slate-300">
-              One-step VM systemd install command:
+              Install CLI, save token once, and forward any port (e.g. <code>nekotunnel tcp 22</code> or <code>nekotunnel tcp 3000</code>):
             </span>
-            <CopyButton text={installCmd} label="Copy VM Install" />
+            <CopyButton text={installCmd} label="Copy CLI Setup" />
           </div>
           <pre className="mt-2 overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs text-cyan-300 dark:bg-slate-950">
             {installCmd}

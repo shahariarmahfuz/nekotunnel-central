@@ -2,43 +2,86 @@
 set -euo pipefail
 
 CMD="${1:-}"
-LOCAL_PORT="${2:-}"
-USER_TOKEN="${3:-${NEKOTUNNEL_TOKEN:-}}"
-API_URL="${4:-${NEKOTUNNEL_API_URL:-}}"
-API_URL="${API_URL%/}"
-
 FRP_VERSION="${FRP_VERSION:-0.57.0}"
-CONFIG_DIR="${HOME:-/tmp}/.cache/nekotunnel"
-mkdir -p "$CONFIG_DIR"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/nekotunnel"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/nekotunnel"
+ENV_FILE="${CONFIG_DIR}/config.env"
+mkdir -p "$CONFIG_DIR" "$CACHE_DIR"
+
+# Load saved config if present
+if [ -f "$ENV_FILE" ]; then
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+fi
 
 usage() {
     cat <<'EOF'
-NekoTunnel VM Client
+NekoTunnel CLI — Forward any local TCP port on demand
 
 Usage:
-  ./nekotunnel tcp <local_port> <user_token> <api_url>
-  ./nekotunnel install <local_port> <user_token> <api_url>
-
-Environment variables (optional):
-  NEKOTUNNEL_TOKEN    User token (ntk_...)
-  NEKOTUNNEL_API_URL  Control panel URL (https://your-app.onrender.com)
+  nekotunnel token <user_token> [api_url]       Save token & panel URL for future runs
+  nekotunnel tcp <local_port> [token] [api_url] Forward any local port in foreground (Ctrl+C to stop)
+  nekotunnel uninstall-service                  Remove background systemd auto-start (if installed)
 
 Examples:
-  ./nekotunnel tcp 22 ntk_xxx https://your-app.onrender.com
-  sudo ./nekotunnel install 22 ntk_xxx https://your-app.onrender.com
+  nekotunnel token ntk_xxx https://nekotunnel-central.onrender.com
+  nekotunnel tcp 22
+  nekotunnel tcp 3000
+  nekotunnel tcp 8080
 EOF
 }
 
+save_config() {
+    local tok="$1"
+    local url="${2%/}"
+    (
+        umask 077
+        cat > "$ENV_FILE" <<ENV_EOF
+NEKOTUNNEL_TOKEN="$tok"
+NEKOTUNNEL_API_URL="$url"
+ENV_EOF
+    )
+    echo "✅ Saved credentials to $ENV_FILE"
+}
+
+if [ "$CMD" = "token" ] || [ "$CMD" = "login" ]; then
+    TOK="${2:-}"
+    URL="${3:-${NEKOTUNNEL_API_URL:-}}"
+    if [ -z "$TOK" ] || [ -z "$URL" ]; then
+        echo "❌ Usage: nekotunnel token <user_token> <api_url>"
+        exit 1
+    fi
+    save_config "$TOK" "$URL"
+    echo "👉 Now forward any port anytime with: nekotunnel tcp 22"
+    exit 0
+fi
+
+if [ "$CMD" = "uninstall-service" ]; then
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "❌ Run with sudo: sudo nekotunnel uninstall-service"
+        exit 1
+    fi
+    systemctl disable --now nekotunnel 2>/dev/null || true
+    rm -f /etc/systemd/system/nekotunnel.service
+    systemctl daemon-reload
+    echo "✅ Removed systemd background service 'nekotunnel'."
+    exit 0
+fi
+
 if [ "$CMD" = "install" ]; then
+    LOCAL_PORT="${2:-}"
+    USER_TOKEN="${3:-${NEKOTUNNEL_TOKEN:-}}"
+    API_URL="${4:-${NEKOTUNNEL_API_URL:-}}"
+    API_URL="${API_URL%/}"
     if [ -z "$LOCAL_PORT" ] || [ -z "$USER_TOKEN" ] || [ -z "$API_URL" ]; then
         usage
         exit 1
     fi
-    BIN_PATH="/usr/local/bin/nekotunnel"
     if [ "$(id -u)" -ne 0 ]; then
         echo "❌ Run 'install' with sudo/root so systemd service can be written."
         exit 1
     fi
+    BIN_PATH="/usr/local/bin/nekotunnel"
     cp "$0" "$BIN_PATH"
     chmod 0755 "$BIN_PATH"
 
@@ -63,18 +106,23 @@ UNIT_EOF
     systemctl daemon-reload
     systemctl enable --now nekotunnel
     echo "✅ Installed & started systemd service 'nekotunnel'!"
-    echo "ℹ️  Check logs with: journalctl -u nekotunnel -f"
     exit 0
 fi
 
-if [ "$CMD" != "tcp" ] || [ -z "$LOCAL_PORT" ]; then
+if [ "$CMD" != "tcp" ] || [ -z "${2:-}" ]; then
     usage
     exit 1
 fi
 
+LOCAL_PORT="$2"
+USER_TOKEN="${3:-${NEKOTUNNEL_TOKEN:-}}"
+API_URL="${4:-${NEKOTUNNEL_API_URL:-}}"
+API_URL="${API_URL%/}"
+
 if [ -z "$USER_TOKEN" ] || [ -z "$API_URL" ]; then
-    echo "❌ Missing token or API URL."
-    usage
+    echo "❌ No saved token or API URL found."
+    echo "👉 Save once: nekotunnel token <USER_TOKEN> <API_URL>"
+    echo "   Or pass directly: nekotunnel tcp $LOCAL_PORT <USER_TOKEN> <API_URL>"
     exit 1
 fi
 
@@ -87,8 +135,8 @@ case "$(uname -m)" in
         ;;
 esac
 
-FRPC="${CONFIG_DIR}/frpc-${FRP_VERSION}-${FRP_ARCH}"
-CONFIG="${CONFIG_DIR}/neko_${LOCAL_PORT}.toml"
+FRPC="${CACHE_DIR}/frpc-${FRP_VERSION}-${FRP_ARCH}"
+CONFIG="${CACHE_DIR}/neko_${LOCAL_PORT}.toml"
 SESSION_ID=""
 FRPC_PID=""
 HEARTBEAT_PID=""
@@ -220,9 +268,11 @@ CONFIG_EOF
     ) &
     HEARTBEAT_PID=$!
 
-    echo "✅ Slot assigned: $SERVER_ADDR:$SERVER_PORT (local 127.0.0.1:$LOCAL_PORT)"
-    echo "🌍 Connect with:"
-    echo "➡️  ssh <user>@$SERVER_ADDR -p $SERVER_PORT"
+    echo "✅ Forwarding 127.0.0.1:$LOCAL_PORT -> $SERVER_ADDR:$SERVER_PORT"
+    echo "🌍 Public endpoint: $SERVER_ADDR:$SERVER_PORT (Press Ctrl+C to stop)"
+    if [ "$LOCAL_PORT" = "22" ]; then
+        echo "➡️  ssh $(whoami)@$SERVER_ADDR -p $SERVER_PORT"
+    fi
     echo "--------------------------------------------------"
 
     "$FRPC" -c "$CONFIG" &

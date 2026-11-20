@@ -56,7 +56,7 @@ export default function AdminOverviewPage() {
     return () => clearInterval(timer);
   }, [load]);
 
-  const vmCommand = `curl -fsSL ${origin}/client/nekotunnel -o nekotunnel && chmod +x nekotunnel && ./nekotunnel tcp 22 YOUR_USER_TOKEN ${origin}`;
+  const vmCommand = `sudo curl -fsSL ${origin}/client/nekotunnel -o /usr/local/bin/nekotunnel && sudo chmod +x /usr/local/bin/nekotunnel && nekotunnel token YOUR_USER_TOKEN ${origin} && nekotunnel tcp 22`;
 
   const cards = data
     ? [

@@ -55,18 +55,17 @@ Keep `ENCRYPTION_KEY` permanent — changing it prevents decrypting previously s
 
 ## VM Client Usage
 
-Download and run on your target Linux VM:
+Install the CLI and save your token once, then forward any port on demand:
 
 ```bash
-curl -fsSL https://your-render-app.onrender.com/client/nekotunnel -o nekotunnel
-chmod +x nekotunnel
-./nekotunnel tcp 22 YOUR_USER_TOKEN https://your-render-app.onrender.com
-```
+sudo curl -fsSL https://your-render-app.onrender.com/client/nekotunnel -o /usr/local/bin/nekotunnel
+sudo chmod +x /usr/local/bin/nekotunnel
+nekotunnel token YOUR_USER_TOKEN https://your-render-app.onrender.com
 
-Or install as a 24/7 `systemd` service:
-
-```bash
-sudo ./nekotunnel install 22 YOUR_USER_TOKEN https://your-render-app.onrender.com
+# Forward whichever port you want (Ctrl+C to stop):
+nekotunnel tcp 22
+nekotunnel tcp 3000
+nekotunnel tcp 8080
 ```
 
 ## Manual Railway Slot Deployment (`railway-slot/`)
