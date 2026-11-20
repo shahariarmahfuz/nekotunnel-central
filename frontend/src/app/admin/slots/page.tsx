@@ -119,11 +119,15 @@ export default function SlotsPage() {
     action: "refresh" | "free" | "delete"
   ) => {
     setError(null);
+    setNotice(null);
     try {
       if (action === "delete") {
         await apiFetch(`/api/admin/slots/${id}`, { method: "DELETE" });
       } else {
         await apiFetch(`/api/admin/slots/${id}/${action}`, { method: "POST" });
+        if (action === "refresh") {
+          setNotice("TCP Proxy synced successfully!");
+        }
       }
       load();
     } catch (err) {

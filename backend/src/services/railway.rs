@@ -600,12 +600,28 @@ exit 1
 }
 
 fn extract_project_id(output: &str) -> Option<String> {
-    if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(output.trim()) {
-        for key in ["projectId", "project_id", "id"] {
-            if let Some(Value::String(val)) = map.get(key) {
-                if !val.is_empty() {
-                    return Some(val.clone());
+    if let Ok(parsed) = serde_json::from_str::<Value>(output.trim()) {
+        let mut stack = vec![&parsed];
+        while let Some(node) = stack.pop() {
+            match node {
+                Value::Object(map) => {
+                    for key in ["projectId", "project_id", "id"] {
+                        if let Some(Value::String(val)) = map.get(key) {
+                            if !val.is_empty() && val.len() >= 16 {
+                                return Some(val.clone());
+                            }
+                        }
+                    }
+                    for v in map.values() {
+                        stack.push(v);
+                    }
                 }
+                Value::Array(arr) => {
+                    for v in arr {
+                        stack.push(v);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -619,6 +635,47 @@ fn extract_project_id(output: &str) -> Option<String> {
                 }
             }
         }
+    }
+    None
+}
+
+fn find_project_id_in_list_json(output: &str, project_name: &str) -> Option<String> {
+    let parsed: Value = serde_json::from_str(output.trim()).ok()?;
+    let mut stack = vec![&parsed];
+    while let Some(node) = stack.pop() {
+        match node {
+            Value::Object(map) => {
+                let name = map.get("name").and_then(|v| v.as_str());
+                let id = map
+                    .get("id")
+                    .or_else(|| map.get("projectId"))
+                    .and_then(|v| v.as_str());
+                if let (Some(n), Some(pid)) = (name, id) {
+                    if n.eq_ignore_ascii_case(project_name) && !pid.is_empty() {
+                        return Some(pid.to_string());
+                    }
+                }
+                for v in map.values() {
+                    stack.push(v);
+                }
+            }
+            Value::Array(arr) => {
+                for v in arr {
+                    stack.push(v);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn json_port_value(v: &Value) -> Option<i32> {
+    if let Some(n) = v.as_i64() {
+        return Some(n as i32);
+    }
+    if let Some(s) = v.as_str() {
+        return s.trim().parse::<i32>().ok();
     }
     None
 }
@@ -638,8 +695,7 @@ fn extract_tcp_proxy_from_json(output: &str) -> Option<(String, i32)> {
                     .get("proxyPort")
                     .or_else(|| map.get("port"))
                     .or_else(|| map.get("externalPort"))
-                    .and_then(|v| v.as_i64())
-                    .map(|p| p as i32);
+                    .and_then(json_port_value);
                 if let (Some(d), Some(p)) = (domain, port) {
                     if !d.is_empty() && (1..=65535).contains(&p) {
                         return Some((d.to_string(), p));
@@ -660,17 +716,55 @@ fn extract_tcp_proxy_from_json(output: &str) -> Option<(String, i32)> {
     None
 }
 
+async fn resolve_project_id(
+    cli_path: &str,
+    auth: &RailwayAuth,
+    project_name: &str,
+    slot_dir: Option<&Path>,
+) -> Option<String> {
+    if let Some(dir) = slot_dir {
+        if dir.exists() {
+            if let Ok(out) = run_railway_cmd(cli_path, &["status", "--json"], auth, Some(dir), 30).await {
+                if let Some(pid) = extract_project_id(&out) {
+                    return Some(pid);
+                }
+            }
+        }
+    }
+    if let Ok(out) = run_railway_cmd(cli_path, &["list", "--json"], auth, None, 30).await {
+        if let Some(pid) = find_project_id_in_list_json(&out, project_name) {
+            return Some(pid);
+        }
+    }
+    None
+}
+
 async fn ensure_and_collect_tcp_link(
     cli_path: &str,
     auth: &RailwayAuth,
     service_name: &str,
     project_id: Option<&str>,
+    slot_dir: Option<&Path>,
     internal_port: u16,
     create_if_missing: bool,
 ) -> Result<(Option<String>, Option<i32>, Option<String>), String> {
-    let port_str = internal_port.to_string();
+    let cwd = slot_dir.filter(|p| p.exists());
 
+    // 1. Check existing TCP proxies first (do not fail if already created)
+    let mut list_args = vec!["tcp-proxy", "list", "-s", service_name, "-e", "production", "--json"];
+    if let Some(pid) = project_id {
+        list_args.push("-p");
+        list_args.push(pid);
+    }
+    if let Ok(out) = run_railway_cmd(cli_path, &list_args, auth, cwd, 60).await {
+        if let Some((host, port)) = extract_tcp_proxy_from_json(&out) {
+            return Ok((Some(host), Some(port), None));
+        }
+    }
+
+    // 2. Create TCP proxy if missing
     if create_if_missing {
+        let port_str = internal_port.to_string();
         let mut create_args = vec![
             "tcp-proxy",
             "create",
@@ -678,40 +772,38 @@ async fn ensure_and_collect_tcp_link(
             &port_str,
             "-s",
             service_name,
+            "-e",
+            "production",
             "--json",
         ];
         if let Some(pid) = project_id {
             create_args.push("-p");
             create_args.push(pid);
         }
-        if let Ok(out) = run_railway_cmd(cli_path, &create_args, auth, None, 60).await {
+        if let Ok(out) = run_railway_cmd(cli_path, &create_args, auth, cwd, 60).await {
+            if let Some((host, port)) = extract_tcp_proxy_from_json(&out) {
+                return Ok((Some(host), Some(port), None));
+            }
+        }
+        if let Ok(out) = run_railway_cmd(cli_path, &list_args, auth, cwd, 60).await {
             if let Some((host, port)) = extract_tcp_proxy_from_json(&out) {
                 return Ok((Some(host), Some(port), None));
             }
         }
     }
 
-    let mut list_args = vec!["tcp-proxy", "list", "-s", service_name, "--json"];
-    if let Some(pid) = project_id {
-        list_args.push("-p");
-        list_args.push(pid);
-    }
-    if let Ok(out) = run_railway_cmd(cli_path, &list_args, auth, None, 60).await {
-        if let Some((host, port)) = extract_tcp_proxy_from_json(&out) {
-            return Ok((Some(host), Some(port), None));
-        }
-    }
-
-    let mut args = vec!["run", "-s", service_name];
+    // 3. Fallback: inspect service env vars via `railway run`
+    let mut args = vec!["run", "-s", service_name, "-e", "production"];
     if let Some(pid) = project_id {
         args.push("-p");
         args.push(pid);
     }
+    args.push("--");
     args.push("sh");
     args.push("-c");
     args.push(r#"printf "%s:%s" "$RAILWAY_TCP_PROXY_DOMAIN" "$RAILWAY_TCP_PROXY_PORT""#);
 
-    let out = run_railway_cmd(cli_path, &args, auth, None, 120).await?;
+    let out = run_railway_cmd(cli_path, &args, auth, cwd, 120).await?;
     let trimmed = out.trim();
     if let Some((host, p_str)) = trimmed.rsplit_once(':') {
         let valid_host = !host.is_empty()
@@ -790,7 +882,16 @@ pub async fn create_and_deploy_slot(
         )
         .await?;
 
-        let project_id = extract_project_id(&init_out);
+        let mut project_id = extract_project_id(&init_out);
+        if project_id.is_none() {
+            project_id = resolve_project_id(
+                &config.railway_cli_path,
+                &auth,
+                &project_name,
+                Some(&slot_dir),
+            )
+            .await;
+        }
         if let Some(ref pid) = project_id {
             sqlx::query("UPDATE slots SET project_id = $1, updated_at = NOW() WHERE id = $2")
                 .bind(pid)
@@ -814,6 +915,25 @@ pub async fn create_and_deploy_slot(
             }
         }
 
+        if let Some(ref pid) = project_id {
+            let _ = run_railway_cmd(
+                &config.railway_cli_path,
+                &[
+                    "link",
+                    "-p",
+                    pid,
+                    "-e",
+                    "production",
+                    "-s",
+                    &config.service_name,
+                ],
+                &auth,
+                Some(&slot_dir),
+                30,
+            )
+            .await;
+        }
+
         run_railway_cmd(
             &config.railway_cli_path,
             &["up", "-s", &config.service_name, "--detach"],
@@ -830,6 +950,7 @@ pub async fn create_and_deploy_slot(
             &auth,
             &config.service_name,
             project_id.as_deref(),
+            Some(&slot_dir),
             config.tcp_internal_port,
             true,
         )
@@ -933,11 +1054,52 @@ pub async fn refresh_slot_tcp(
     };
 
     let auth = prepare_account_auth(config, acct)?;
+    let slot_dir = PathBuf::from(&config.slot_work_root).join(&slot.project_name);
+    let _ = std::fs::create_dir_all(&slot_dir);
+
+    let mut project_id = slot.project_id.clone();
+    if project_id.is_none() {
+        project_id = resolve_project_id(
+            &config.railway_cli_path,
+            &auth,
+            &slot.project_name,
+            Some(&slot_dir),
+        )
+        .await;
+        if let Some(ref pid) = project_id {
+            let _ = sqlx::query("UPDATE slots SET project_id = $1, updated_at = NOW() WHERE id = $2")
+                .bind(pid)
+                .bind(&slot.id)
+                .execute(pool)
+                .await;
+        }
+    }
+
+    if let Some(ref pid) = project_id {
+        let _ = run_railway_cmd(
+            &config.railway_cli_path,
+            &[
+                "link",
+                "-p",
+                pid,
+                "-e",
+                "production",
+                "-s",
+                &slot.service_name,
+            ],
+            &auth,
+            Some(&slot_dir),
+            30,
+        )
+        .await;
+    }
+
     match ensure_and_collect_tcp_link(
         &config.railway_cli_path,
         &auth,
         &slot.service_name,
-        slot.project_id.as_deref(),
+        project_id.as_deref(),
+        Some(&slot_dir),
         config.tcp_internal_port,
         true,
     )
@@ -1038,6 +1200,20 @@ mod tests {
         assert_eq!(
             proxy,
             Some(("monorail.proxy.rlwy.net".to_string(), 45123))
+        );
+
+        let proxy_str = extract_tcp_proxy_from_json(
+            r#"{"domain":"shinkansen.proxy.rlwy.net","proxyPort":"20239"}"#,
+        );
+        assert_eq!(
+            proxy_str,
+            Some(("shinkansen.proxy.rlwy.net".to_string(), 20239))
+        );
+
+        let list_out = r#"[{"id":"8b123456-7890-4abc-def0-1234567890ab","name":"nekotunnel-test-1795191181"}]"#;
+        assert_eq!(
+            find_project_id_in_list_json(list_out, "nekotunnel-test-1795191181").as_deref(),
+            Some("8b123456-7890-4abc-def0-1234567890ab")
         );
     }
 
