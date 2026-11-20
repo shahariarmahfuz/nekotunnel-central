@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { Plus, RefreshCw, Rocket, Server, Trash2, Unlock } from "lucide-react";
+import { Plus, RefreshCw, Rocket, Server, Terminal, Trash2, Unlock, X } from "lucide-react";
 import { AdminShell } from "@/components/AdminShell";
 import { CopyButton } from "@/components/CopyButton";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -37,11 +37,21 @@ type SlotItem = {
   last_error: string | null;
 };
 
+type InspectData = {
+  project_name: string;
+  project_id: string | null;
+  tcp_proxies: string;
+  deployments: string;
+  logs: string;
+};
+
 export default function SlotsPage() {
   const [slots, setSlots] = useState<SlotItem[]>([]);
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
+  const [inspectData, setInspectData] = useState<InspectData | null>(null);
+  const [inspectingId, setInspectingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [accountId, setAccountId] = useState("");
@@ -73,7 +83,25 @@ export default function SlotsPage() {
   useEffect(() => {
     load();
     const timer = setInterval(load, 8000);
-    return () => clearInterval(timer);
+    const inspectSlot = async (s: SlotItem) => {
+    setError(null);
+    setInspectingId(s.id);
+    try {
+      const res = await apiFetch<Omit<InspectData, "project_name">>(
+        `/api/admin/slots/${s.id}/inspect`
+      );
+      setInspectData({
+        project_name: s.project_name,
+        ...res,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to inspect Railway slot");
+    } finally {
+      setInspectingId(null);
+    }
+  };
+
+  return () => clearInterval(timer);
   }, [load]);
 
   const handleCreateRailway = async (e: FormEvent) => {
@@ -146,6 +174,24 @@ export default function SlotsPage() {
     }
   };
 
+  const inspectSlot = async (s: SlotItem) => {
+    setError(null);
+    setInspectingId(s.id);
+    try {
+      const res = await apiFetch<Omit<InspectData, "project_name">>(
+        `/api/admin/slots/${s.id}/inspect`
+      );
+      setInspectData({
+        project_name: s.project_name,
+        ...res,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to inspect Railway slot");
+    } finally {
+      setInspectingId(null);
+    }
+  };
+
   return (
     <AdminShell
       title="Tunnel Slots"
@@ -184,7 +230,7 @@ export default function SlotsPage() {
             action={<CopyButton text={createdToken} label="Copy Token" />}
           />
           <CardContent>
-            <pre className="overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-950 p-3 text-xs text-emerald-300 dark:border-zinc-800">
+            <pre className="w-full max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded-xl border border-zinc-200 bg-zinc-950 p-3 text-xs text-emerald-300 dark:border-zinc-800">
               {createdToken}
             </pre>
           </CardContent>
@@ -357,14 +403,25 @@ export default function SlotsPage() {
 
                   <div className="flex flex-wrap gap-2">
                     {s.account_label && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => runSlotAction(s.id, "refresh")}
-                      >
-                        <RefreshCw className="h-3.5 w-3.5" />
-                        Refresh TCP
-                      </Button>
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => runSlotAction(s.id, "refresh")}
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" />
+                          Refresh TCP
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={inspectingId === s.id}
+                          onClick={() => inspectSlot(s)}
+                        >
+                          <Terminal className="h-3.5 w-3.5" />
+                          {inspectingId === s.id ? "Loading..." : "Inspect"}
+                        </Button>
+                      </>
                     )}
                     <Button
                       variant="outline"
@@ -438,14 +495,25 @@ export default function SlotsPage() {
                       <td className="px-4 py-3 text-right">
                         <div className="inline-flex items-center gap-1.5">
                           {s.account_label && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => runSlotAction(s.id, "refresh")}
-                            >
-                              <RefreshCw className="h-3.5 w-3.5" />
-                              Refresh TCP
-                            </Button>
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => runSlotAction(s.id, "refresh")}
+                              >
+                                <RefreshCw className="h-3.5 w-3.5" />
+                                Refresh TCP
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                disabled={inspectingId === s.id}
+                                onClick={() => inspectSlot(s)}
+                              >
+                                <Terminal className="h-3.5 w-3.5" />
+                                {inspectingId === s.id ? "..." : "Inspect"}
+                              </Button>
+                            </>
                           )}
                           <Button
                             variant="outline"
@@ -472,6 +540,40 @@ export default function SlotsPage() {
           </>
         )}
       </Card>
+
+      {inspectData && (
+        <Card className="mt-5">
+          <CardHeader
+            title={`Railway Slot Diagnostics: ${inspectData.project_name}`}
+            description={`Project ID: ${inspectData.project_id || "unknown"}`}
+            action={
+              <Button variant="ghost" size="sm" onClick={() => setInspectData(null)}>
+                <X className="h-4 w-4" />
+              </Button>
+            }
+          />
+          <CardContent className="space-y-4">
+            <div>
+              <FieldLabel>TCP Proxies</FieldLabel>
+              <pre className="w-full max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded-xl border border-zinc-200 bg-zinc-950 p-3 text-[11px] text-zinc-200 dark:border-zinc-800">
+                {inspectData.tcp_proxies}
+              </pre>
+            </div>
+            <div>
+              <FieldLabel>Deployments</FieldLabel>
+              <pre className="w-full max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded-xl border border-zinc-200 bg-zinc-950 p-3 text-[11px] text-zinc-200 dark:border-zinc-800">
+                {inspectData.deployments}
+              </pre>
+            </div>
+            <div>
+              <FieldLabel>Container Logs</FieldLabel>
+              <pre className="max-h-72 w-full max-w-full overflow-auto whitespace-pre-wrap break-all rounded-xl border border-zinc-200 bg-zinc-950 p-3 text-[11px] text-emerald-300 dark:border-zinc-800">
+                {inspectData.logs}
+              </pre>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </AdminShell>
   );
 }

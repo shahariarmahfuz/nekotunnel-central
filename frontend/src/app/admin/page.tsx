@@ -127,12 +127,12 @@ export default function AdminOverviewPage() {
       </div>
 
       {/* Bento Grid: VM CLI + Runtime Health */}
-      <div className="mt-4 grid gap-4 lg:grid-cols-12">
-        <Card className="lg:col-span-7">
+      <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-12">
+        <Card className="min-w-0 lg:col-span-7">
           <CardHeader
             title={
               <span className="flex items-center gap-2">
-                <Terminal className="h-4 w-4 text-zinc-500" />
+                <Terminal className="h-4 w-4 shrink-0 text-zinc-500" />
                 VM CLI Setup
               </span>
             }
@@ -140,17 +140,17 @@ export default function AdminOverviewPage() {
             action={<CopyButton text={vmInstall} label="Copy Install" />}
           />
           <CardContent className="space-y-3">
-            <pre className="overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-950 p-3 text-[11px] leading-relaxed text-zinc-100 dark:border-zinc-800">
+            <pre className="w-full max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded-xl border border-zinc-200 bg-zinc-950 p-3 text-[11px] leading-relaxed text-zinc-100 dark:border-zinc-800">
               {vmInstall}
             </pre>
-            <div className="grid gap-2 text-xs text-zinc-600 dark:text-zinc-400 sm:grid-cols-2">
-              <div className="rounded-xl border border-zinc-200/80 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/60">
+            <div className="grid min-w-0 gap-2 text-xs text-zinc-600 dark:text-zinc-400 sm:grid-cols-2">
+              <div className="min-w-0 overflow-hidden rounded-xl border border-zinc-200/80 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/60">
                 <div className="text-[11px] text-zinc-400">1. Save token once</div>
                 <code className="mt-0.5 block break-all text-zinc-800 dark:text-zinc-200">
                   nekotunnel token YOUR_TOKEN {origin}
                 </code>
               </div>
-              <div className="rounded-xl border border-zinc-200/80 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/60">
+              <div className="min-w-0 overflow-hidden rounded-xl border border-zinc-200/80 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/60">
                 <div className="text-[11px] text-zinc-400">2. Forward any port</div>
                 <code className="mt-0.5 block text-zinc-800 dark:text-zinc-200">
                   nekotunnel tcp 22 <span className="text-zinc-400">or</span> 3000
@@ -160,7 +160,7 @@ export default function AdminOverviewPage() {
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-5">
+        <Card className="min-w-0 lg:col-span-5">
           <CardHeader
             title="Runtime Status"
             description="Backend worker & slot configuration"

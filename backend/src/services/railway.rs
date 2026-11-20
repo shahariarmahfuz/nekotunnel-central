@@ -1163,6 +1163,69 @@ pub async fn refresh_slot_tcp(
     }
 }
 
+pub async fn inspect_slot_railway(
+    pool: &PgPool,
+    config: &Config,
+    slot: &SlotSecretRow,
+    account: Option<&RailwayAccountSecret>,
+) -> Result<Value, String> {
+    let Some(acct) = account else {
+        return Err("No Railway account attached to this slot.".to_string());
+    };
+    let auth = prepare_account_auth(config, acct)?;
+    let slot_dir = PathBuf::from(&config.slot_work_root).join(&slot.project_name);
+    let _ = std::fs::create_dir_all(&slot_dir);
+
+    let mut project_id = slot.project_id.clone();
+    if project_id.is_none() {
+        project_id = resolve_project_id(
+            &config.railway_cli_path,
+            &auth,
+            &slot.project_name,
+            Some(&slot_dir),
+        )
+        .await;
+        if let Some(ref pid) = project_id {
+            let _ = sqlx::query("UPDATE slots SET project_id = $1, updated_at = NOW() WHERE id = $2")
+                .bind(pid)
+                .bind(&slot.id)
+                .execute(pool)
+                .await;
+        }
+    }
+
+    if let Some(ref pid) = project_id {
+        let _ = run_railway_cmd(
+            &config.railway_cli_path,
+            &["link", "-p", pid, "-e", "production", "-s", &slot.service_name],
+            &auth,
+            Some(&slot_dir),
+            30,
+        )
+        .await;
+    }
+
+    let mut tcp_args = vec!["tcp-proxy", "list", "-s", &slot.service_name, "-e", "production", "--json"];
+    let mut dep_args = vec!["deployment", "list", "-s", &slot.service_name, "-e", "production", "--json"];
+    let mut log_args = vec!["logs", "--lines", "40", "--latest", "-s", &slot.service_name, "-e", "production"];
+    if let Some(ref pid) = project_id {
+        tcp_args.extend(["-p", pid]);
+        dep_args.extend(["-p", pid]);
+        log_args.extend(["-p", pid]);
+    }
+
+    let tcp_out = run_railway_cmd(&config.railway_cli_path, &tcp_args, &auth, Some(&slot_dir), 30).await;
+    let dep_out = run_railway_cmd(&config.railway_cli_path, &dep_args, &auth, Some(&slot_dir), 30).await;
+    let log_out = run_railway_cmd(&config.railway_cli_path, &log_args, &auth, Some(&slot_dir), 30).await;
+
+    Ok(serde_json::json!({
+        "project_id": project_id,
+        "tcp_proxies": tcp_out.as_deref().unwrap_or_else(|e| e),
+        "deployments": dep_out.as_deref().unwrap_or_else(|e| e),
+        "logs": log_out.as_deref().unwrap_or_else(|e| e),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

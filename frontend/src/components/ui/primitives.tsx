@@ -9,7 +9,7 @@ export function Card({
 }) {
   return (
     <section
-      className={`rounded-2xl border border-zinc-200/90 bg-white shadow-2xs dark:border-zinc-800/80 dark:bg-zinc-900/50 ${className}`}
+      className={`min-w-0 w-full rounded-2xl border border-zinc-200/90 bg-white shadow-2xs dark:border-zinc-800/80 dark:bg-zinc-900/50 ${className}`}
     >
       {children}
     </section>
@@ -29,14 +29,14 @@ export function CardHeader({
 }) {
   return (
     <div
-      className={`flex flex-wrap items-start justify-between gap-3 border-b border-zinc-200/80 px-4 py-3.5 dark:border-zinc-800/80 sm:px-5 sm:py-4 ${className}`}
+      className={`flex min-w-0 flex-wrap items-start justify-between gap-3 border-b border-zinc-200/80 px-4 py-3.5 dark:border-zinc-800/80 sm:px-5 sm:py-4 ${className}`}
     >
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <h2 className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
           {title}
         </h2>
         {description && (
-          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+          <p className="mt-0.5 break-words text-xs text-zinc-500 dark:text-zinc-400">
             {description}
           </p>
         )}
@@ -53,7 +53,7 @@ export function CardContent({
   children: React.ReactNode;
   className?: string;
 }) {
-  return <div className={`p-4 sm:p-5 ${className}`}>{children}</div>;
+  return <div className={`min-w-0 p-4 sm:p-5 ${className}`}>{children}</div>;
 }
 
 type ButtonVariant = "primary" | "secondary" | "outline" | "danger" | "ghost";

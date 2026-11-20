@@ -169,7 +169,7 @@ export default function UsersPage() {
             action={<CopyButton text={newToken} label="Copy Token" />}
           />
           <CardContent className="space-y-3">
-            <pre className="overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-950 p-3 text-xs text-emerald-300 dark:border-zinc-800">
+            <pre className="w-full max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded-xl border border-zinc-200 bg-zinc-950 p-3 text-xs text-emerald-300 dark:border-zinc-800">
               {newToken}
             </pre>
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -178,7 +178,7 @@ export default function UsersPage() {
               </span>
               <CopyButton text={installCmd} label="Copy Full Setup" />
             </div>
-            <pre className="overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-950 p-3 text-[11px] leading-relaxed text-zinc-200 dark:border-zinc-800">
+            <pre className="w-full max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded-xl border border-zinc-200 bg-zinc-950 p-3 text-[11px] leading-relaxed text-zinc-200 dark:border-zinc-800">
               {installCmd}
             </pre>
           </CardContent>
