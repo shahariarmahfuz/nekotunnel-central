@@ -2,8 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import { Lock, Radio, ShieldCheck } from "lucide-react";
+import { ArrowRight, Lock, Radio } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeProvider";
+import { Button, Input, Notice } from "@/components/ui/primitives";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -49,72 +50,60 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col items-center justify-center bg-slate-50 px-4 dark:bg-[#070b14]">
+    <div className="relative flex min-h-screen flex-col items-center justify-center bg-zinc-50 px-4 py-10 dark:bg-zinc-950">
       <div className="absolute right-4 top-4">
         <ThemeToggle />
       </div>
 
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-xl shadow-slate-200/60 dark:border-slate-800 dark:bg-[#0b1120] dark:shadow-2xl dark:shadow-black/60">
-        <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500/15 ring-1 ring-emerald-500/30">
-            <Radio className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
+      <div className="w-full max-w-sm">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-zinc-900 text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-950">
+            <Radio className="h-5 w-5" />
           </div>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">
-              NekoTunnel Central
-            </h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Railway TCP Tunnel Control Plane
-            </p>
-          </div>
+          <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+            NekoTunnel Central
+          </h1>
+          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            Sign in with your control plane admin token
+          </p>
         </div>
 
-        <p className="mb-6 text-sm text-slate-600 dark:text-slate-400">
-          Enter your{" "}
-          <code className="rounded bg-slate-100 px-1.5 py-0.5 text-emerald-700 dark:bg-slate-800 dark:text-emerald-300">
-            ADMIN_TOKEN
-          </code>{" "}
-          to manage Railway CLI accounts, tunnel slots, and active SSH tunnels.
-        </p>
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-6 shadow-xs dark:border-zinc-800/80 dark:bg-zinc-900/60">
+          {error && (
+            <Notice tone="error" className="mb-4">
+              {error}
+            </Notice>
+          )}
 
-        {error && (
-          <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3.5 py-2.5 text-sm text-rose-700 dark:text-rose-300">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div>
-            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Admin Token
-            </label>
-            <div className="relative">
-              <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
-              <input
-                type="password"
-                required
-                autoFocus
-                disabled={checking || loading}
-                value={adminToken}
-                onChange={(e) => setAdminToken(e.target.value)}
-                placeholder="Enter ADMIN_TOKEN"
-                className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-10 pr-3 text-sm text-slate-900 placeholder-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-900/90 dark:text-white dark:placeholder-slate-500"
-              />
+          <form onSubmit={onSubmit} className="space-y-4">
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                Admin Token
+              </label>
+              <div className="relative">
+                <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                <Input
+                  type="password"
+                  required
+                  autoFocus
+                  disabled={checking || loading}
+                  value={adminToken}
+                  onChange={(e) => setAdminToken(e.target.value)}
+                  placeholder="Enter ADMIN_TOKEN"
+                  className="pl-9"
+                />
+              </div>
             </div>
-          </div>
 
-          <button
-            type="submit"
-            disabled={checking || loading}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <ShieldCheck className="h-4 w-4" />
-            <span>{loading ? "Signing in..." : "Sign in to Control Panel"}</span>
-          </button>
-        </form>
-
-        <div className="mt-6 border-t border-slate-200 pt-4 text-center text-xs text-slate-500 dark:border-slate-800/80">
-          Next.js public gateway • Internal Rust Axum backend
+            <Button
+              type="submit"
+              disabled={checking || loading}
+              className="w-full"
+            >
+              <span>{loading ? "Signing in..." : "Continue"}</span>
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </form>
         </div>
       </div>
     </div>

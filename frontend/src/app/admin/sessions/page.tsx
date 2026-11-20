@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw, XCircle } from "lucide-react";
+import { Activity, RefreshCw, XCircle } from "lucide-react";
 import { AdminShell } from "@/components/AdminShell";
 import { CopyButton } from "@/components/CopyButton";
 import { StatusBadge } from "@/components/StatusBadge";
+import { Button, Card, CardHeader, EmptyState, Notice } from "@/components/ui/primitives";
 import { apiFetch, formatTime } from "@/lib/api";
 
 type SessionItem = {
@@ -52,108 +53,151 @@ export default function SessionsPage() {
 
   return (
     <AdminShell
-      title="Live & Recent Sessions"
-      subtitle="Monitor active client heartbeats, assigned Railway endpoints, and terminate stale tunnels"
+      title="Sessions"
+      subtitle="Active client heartbeats, endpoints, and recent tunnel history"
       actions={
-        <button
-          type="button"
-          onClick={load}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-800"
-        >
+        <Button variant="outline" size="sm" onClick={load}>
           <RefreshCw className="h-3.5 w-3.5" />
           Refresh
-        </button>
+        </Button>
       }
     >
       {error && (
-        <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-700 dark:text-rose-300">
+        <Notice tone="error" className="mb-4">
           {error}
-        </div>
+        </Notice>
       )}
 
-      <section className="rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800/90 dark:bg-[#0b1120]">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-800/80 dark:bg-slate-900/40 dark:text-slate-400">
-              <tr>
-                <th className="px-4 py-3 font-medium">Session</th>
-                <th className="px-4 py-3 font-medium">User</th>
-                <th className="px-4 py-3 font-medium">Slot & Endpoint</th>
-                <th className="px-4 py-3 font-medium">Local Port</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">Heartbeat</th>
-                <th className="px-4 py-3 font-medium text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-slate-800/60">
-              {sessions.length ? (
-                sessions.map((s) => (
-                  <tr key={s.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/30">
-                    <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-300">
-                      {s.id.slice(0, 8)}
-                    </td>
-                    <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">
-                      {s.user_name}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="text-slate-800 dark:text-slate-200">
-                        {s.slot_project_name}
+      <Card className="overflow-hidden">
+        <CardHeader title={`Recent Sessions (${sessions.length})`} />
+
+        {!sessions.length ? (
+          <EmptyState
+            icon={<Activity className="h-4 w-4" />}
+            title="No tunnel sessions yet"
+            description="Run nekotunnel tcp 22 on your VM to open a live session."
+          />
+        ) : (
+          <>
+            {/* Mobile Cards */}
+            <div className="divide-y divide-zinc-200/80 dark:divide-zinc-800/80 md:hidden">
+              {sessions.map((s) => (
+                <div key={s.id} className="space-y-2.5 p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                        {s.user_name}
                       </div>
-                      {s.server_addr && s.server_port && (
-                        <div className="mt-1 flex items-center gap-2">
-                          <code className="rounded bg-slate-100 px-1.5 py-0.5 text-emerald-700 dark:bg-slate-900 dark:text-emerald-300">
-                            {s.server_addr}:{s.server_port}
-                          </code>
-                          {s.status === "active" && (
-                            <CopyButton
-                              text={`ssh user@${s.server_addr} -p ${s.server_port}`}
-                              label="SSH"
-                            />
-                          )}
-                        </div>
+                      <div className="truncate text-xs text-zinc-500 dark:text-zinc-400">
+                        {s.slot_project_name} • Port {s.client_local_port ?? "—"}
+                      </div>
+                    </div>
+                    <StatusBadge status={s.status} />
+                  </div>
+
+                  {s.server_addr && s.server_port && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/60">
+                      <code className="break-all text-xs text-zinc-800 dark:text-zinc-200">
+                        {s.server_addr}:{s.server_port}
+                      </code>
+                      {s.status === "active" && (
+                        <CopyButton
+                          text={`ssh user@${s.server_addr} -p ${s.server_port}`}
+                          label="Copy SSH"
+                        />
                       )}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-slate-700 dark:text-slate-300">
-                      {s.client_local_port ?? "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={s.status} />
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                      <div>Last: {formatTime(s.last_heartbeat_at)}</div>
-                      {s.ended_at && (
-                        <div className="text-[11px] text-slate-400 dark:text-slate-500">
-                          Ended: {formatTime(s.ended_at)}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      {s.status === "active" ? (
-                        <button
-                          type="button"
-                          onClick={() => terminate(s.id)}
-                          className="inline-flex items-center gap-1 rounded border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-xs text-rose-700 hover:bg-rose-500/20 dark:text-rose-300"
-                        >
-                          <XCircle className="h-3.5 w-3.5" />
-                          Terminate
-                        </button>
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
-                    </td>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                    <span>HB: {formatTime(s.last_heartbeat_at)}</span>
+                    {s.ended_at && <span>Ended: {formatTime(s.ended_at)}</span>}
+                  </div>
+
+                  {s.status === "active" && (
+                    <Button variant="danger" size="sm" onClick={() => terminate(s.id)}>
+                      <XCircle className="h-3.5 w-3.5" />
+                      Terminate Session
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop Table */}
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-zinc-200/80 bg-zinc-50/80 text-zinc-500 dark:border-zinc-800/80 dark:bg-zinc-900/80 dark:text-zinc-400">
+                  <tr>
+                    <th className="px-4 py-2.5 font-medium">User</th>
+                    <th className="px-4 py-2.5 font-medium">Slot & Endpoint</th>
+                    <th className="px-4 py-2.5 font-medium">Local Port</th>
+                    <th className="px-4 py-2.5 font-medium">Status</th>
+                    <th className="px-4 py-2.5 font-medium">Heartbeat</th>
+                    <th className="px-4 py-2.5 font-medium text-right">Action</th>
                   </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-slate-500">
-                    No tunnel sessions recorded yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                </thead>
+                <tbody className="divide-y divide-zinc-200/60 dark:divide-zinc-800/60">
+                  {sessions.map((s) => (
+                    <tr key={s.id} className="hover:bg-zinc-50/80 dark:hover:bg-zinc-900/40">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-zinc-900 dark:text-zinc-100">
+                          {s.user_name}
+                        </div>
+                        <div className="font-mono text-[11px] text-zinc-400">
+                          {s.id.slice(0, 8)}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="text-zinc-700 dark:text-zinc-300">
+                          {s.slot_project_name}
+                        </div>
+                        {s.server_addr && s.server_port && (
+                          <div className="mt-1 flex items-center gap-2">
+                            <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+                              {s.server_addr}:{s.server_port}
+                            </code>
+                            {s.status === "active" && (
+                              <CopyButton
+                                text={`ssh user@${s.server_addr} -p ${s.server_port}`}
+                                label="SSH"
+                              />
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-zinc-700 dark:text-zinc-300">
+                        {s.client_local_port ?? "—"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={s.status} />
+                      </td>
+                      <td className="px-4 py-3 text-zinc-500 dark:text-zinc-400">
+                        <div>{formatTime(s.last_heartbeat_at)}</div>
+                        {s.ended_at && (
+                          <div className="text-[11px] text-zinc-400">
+                            Ended: {formatTime(s.ended_at)}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {s.status === "active" ? (
+                          <Button variant="danger" size="sm" onClick={() => terminate(s.id)}>
+                            <XCircle className="h-3.5 w-3.5" />
+                            Terminate
+                          </Button>
+                        ) : (
+                          <span className="text-zinc-400">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </Card>
     </AdminShell>
   );
 }

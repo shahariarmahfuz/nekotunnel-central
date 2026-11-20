@@ -28,6 +28,7 @@ pub struct UserDto {
     pub id: String,
     pub name: String,
     pub token_prefix: String,
+    pub has_token: bool,
     pub status: String,
     pub max_sessions: i32,
     pub active_sessions: i64,

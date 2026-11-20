@@ -14,6 +14,16 @@ import {
 import { AdminShell } from "@/components/AdminShell";
 import { CopyButton } from "@/components/CopyButton";
 import { StatusBadge } from "@/components/StatusBadge";
+import {
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  EmptyState,
+  FieldLabel,
+  Input,
+  Notice,
+} from "@/components/ui/primitives";
 import { apiFetch, formatTime } from "@/lib/api";
 
 type AccountItem = {
@@ -159,205 +169,231 @@ export default function AccountsPage() {
   return (
     <AdminShell
       title="Railway CLI Accounts"
-      subtitle="Connect Railway accounts directly via Railway CLI browserless login — no API token needed"
+      subtitle="Connect accounts via browserless Railway CLI login — encrypted session persists in Postgres"
       actions={
-        <button
-          type="button"
-          onClick={load}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-800"
-        >
+        <Button variant="outline" size="sm" onClick={load}>
           <RefreshCw className="h-3.5 w-3.5" />
           Refresh
-        </button>
+        </Button>
       }
     >
       {error && (
-        <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-700 dark:text-rose-300">
+        <Notice tone="error" className="mb-4 break-words">
           {error}
-        </div>
+        </Notice>
       )}
       {notice && (
-        <div className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
+        <Notice tone="success" className="mb-4">
           {notice}
-        </div>
+        </Notice>
       )}
 
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800/90 dark:bg-[#0b1120]">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-          <Cloud className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-          Connect Railway Account via CLI
-        </h2>
-        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-          Runs <code className="rounded bg-slate-100 px-1 py-0.5 dark:bg-slate-800">railway login --browserless</code> inside the backend container and saves your encrypted CLI session in PostgreSQL so it persists across restarts.
-        </p>
+      <Card>
+        <CardHeader
+          title={
+            <span className="flex items-center gap-2">
+              <Cloud className="h-4 w-4 text-zinc-500" />
+              Connect Railway CLI
+            </span>
+          }
+          description="Runs railway login --browserless inside the backend container (no API token required)"
+        />
+        <CardContent>
+          <form onSubmit={handleStartCliLogin} className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <FieldLabel>Account Label</FieldLabel>
+              <Input
+                required
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                placeholder="main-railway"
+              />
+            </div>
+            <div>
+              <FieldLabel>Workspace Name or ID (optional)</FieldLabel>
+              <Input
+                value={workspace}
+                onChange={(e) => setWorkspace(e.target.value)}
+                placeholder="Leave blank for default workspace"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <Button
+                type="submit"
+                disabled={
+                  startingLogin ||
+                  loginJob?.status === "awaiting_user" ||
+                  loginJob?.status === "starting"
+                }
+                className="w-full sm:w-auto"
+              >
+                <Cloud className="h-4 w-4" />
+                <span>
+                  {startingLogin ? "Starting Railway CLI..." : "Login with Railway CLI"}
+                </span>
+              </Button>
+            </div>
+          </form>
 
-        <form onSubmit={handleStartCliLogin} className="mt-4 grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-xs text-slate-600 dark:text-slate-400">
-              Account Label
-            </label>
-            <input
-              required
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="main-railway"
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs text-slate-600 dark:text-slate-400">
-              Workspace Name or ID (optional)
-            </label>
-            <input
-              value={workspace}
-              onChange={(e) => setWorkspace(e.target.value)}
-              placeholder="Leave blank for default workspace"
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <button
-              type="submit"
-              disabled={startingLogin || loginJob?.status === "awaiting_user" || loginJob?.status === "starting"}
-              className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <Cloud className="h-4 w-4" />
-              <span>{startingLogin ? "Starting Railway CLI..." : "Login with Railway CLI"}</span>
-            </button>
-          </div>
-        </form>
-
-        {loginJob && loginJob.status !== "failed" && (
-          <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 dark:bg-emerald-950/20">
-            {loginJob.status === "starting" && (
-              <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-                <Loader2 className="h-4 w-4 animate-spin text-emerald-500" />
-                Launching <code>railway login --browserless</code>...
-              </div>
-            )}
-
-            {loginJob.status === "awaiting_user" && (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+          {loginJob && loginJob.status !== "failed" && (
+            <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
+              {loginJob.status === "starting" && (
+                <div className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Waiting for your browser authorization...
+                  Launching <code>railway login --browserless</code>...
                 </div>
-
-                {loginJob.user_code && (
-                  <div className="flex flex-wrap items-center gap-3">
-                    <span className="text-xs text-slate-600 dark:text-slate-400">Pairing Code:</span>
-                    <code className="rounded-lg border border-emerald-500/40 bg-white px-3 py-1.5 text-base font-bold tracking-widest text-emerald-700 dark:bg-slate-950 dark:text-emerald-300">
-                      {loginJob.user_code}
-                    </code>
-                    <CopyButton text={loginJob.user_code} label="Copy Code" />
-                  </div>
-                )}
-
-                {loginJob.activation_url && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <a
-                      href={loginJob.activation_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3.5 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-400"
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                      Open Railway Activation Page
-                    </a>
-                    <CopyButton text={loginJob.activation_url} label="Copy Link" />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {loginJob.status === "completed" && (
-              <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-                <CheckCircle2 className="h-4 w-4" />
-                Railway CLI login complete! Connected as {loginJob.railway_user || loginJob.label}.
-              </div>
-            )}
-          </div>
-        )}
-      </section>
-
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800/90 dark:bg-[#0b1120]">
-        <div className="border-b border-slate-200 px-5 py-3.5 dark:border-slate-800/80">
-          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
-            Connected Accounts ({accounts.length})
-          </h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-800/80 dark:bg-slate-900/40 dark:text-slate-400">
-              <tr>
-                <th className="px-4 py-3 font-medium">Label</th>
-                <th className="px-4 py-3 font-medium">Railway User</th>
-                <th className="px-4 py-3 font-medium">Workspace</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">Checked</th>
-                <th className="px-4 py-3 font-medium text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-slate-800/60">
-              {accounts.length ? (
-                accounts.map((a) => (
-                  <tr key={a.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/30">
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-slate-900 dark:text-white">{a.label}</div>
-                      <div className="text-[11px] text-slate-500">{a.auth_mode}</div>
-                    </td>
-                    <td className="px-4 py-3 text-slate-700 dark:text-slate-300">
-                      {a.railway_user || "—"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                      {a.workspace || <span className="text-slate-400">default</span>}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={a.status} />
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                      {formatTime(a.last_checked_at || a.created_at)}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="inline-flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => verify(a.id)}
-                          className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-                        >
-                          <ShieldCheck className="h-3 w-3" />
-                          Verify
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => toggle(a.id)}
-                          className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-                        >
-                          <Power className="h-3 w-3" />
-                          {a.status === "active" ? "Disable" : "Enable"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => remove(a.id)}
-                          className="inline-flex items-center gap-1 rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-xs text-rose-700 hover:bg-rose-500/20 dark:text-rose-300"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
-                    No Railway CLI accounts connected yet.
-                  </td>
-                </tr>
               )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+
+              {loginJob.status === "awaiting_user" && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-medium text-zinc-800 dark:text-zinc-200">
+                    <Loader2 className="h-4 w-4 animate-spin text-emerald-500" />
+                    Waiting for browser authorization...
+                  </div>
+
+                  {loginJob.user_code && (
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                        Code:
+                      </span>
+                      <code className="rounded-lg border border-zinc-200 bg-white px-3 py-1 text-base font-semibold tracking-widest text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100">
+                        {loginJob.user_code}
+                      </code>
+                      <CopyButton text={loginJob.user_code} label="Copy Code" />
+                    </div>
+                  )}
+
+                  {loginJob.activation_url && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <a
+                        href={loginJob.activation_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl bg-zinc-900 px-3.5 py-2 text-xs font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-white"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        Open Railway Activation Page
+                      </a>
+                      <CopyButton text={loginJob.activation_url} label="Copy Link" />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {loginJob.status === "completed" && (
+                <div className="flex items-center gap-2 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Connected as {loginJob.railway_user || loginJob.label}!
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="mt-5 overflow-hidden">
+        <CardHeader title={`Connected Accounts (${accounts.length})`} />
+
+        {!accounts.length ? (
+          <EmptyState
+            icon={<Cloud className="h-4 w-4" />}
+            title="No Railway accounts connected"
+            description="Click Login with Railway CLI above to pair your Railway workspace."
+          />
+        ) : (
+          <>
+            {/* Mobile Cards */}
+            <div className="divide-y divide-zinc-200/80 dark:divide-zinc-800/80 md:hidden">
+              {accounts.map((a) => (
+                <div key={a.id} className="space-y-3 p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                        {a.label}
+                      </div>
+                      <div className="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400">
+                        {a.railway_user || a.auth_mode} • {a.workspace || "default"}
+                      </div>
+                    </div>
+                    <StatusBadge status={a.status} />
+                  </div>
+                  <div className="text-[11px] text-zinc-400">
+                    Checked: {formatTime(a.last_checked_at || a.created_at)}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => verify(a.id)}>
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      Verify
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => toggle(a.id)}>
+                      <Power className="h-3.5 w-3.5" />
+                      {a.status === "active" ? "Disable" : "Enable"}
+                    </Button>
+                    <Button variant="danger" size="sm" onClick={() => remove(a.id)}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop Table */}
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-zinc-200/80 bg-zinc-50/80 text-zinc-500 dark:border-zinc-800/80 dark:bg-zinc-900/80 dark:text-zinc-400">
+                  <tr>
+                    <th className="px-4 py-2.5 font-medium">Label</th>
+                    <th className="px-4 py-2.5 font-medium">Railway User</th>
+                    <th className="px-4 py-2.5 font-medium">Workspace</th>
+                    <th className="px-4 py-2.5 font-medium">Status</th>
+                    <th className="px-4 py-2.5 font-medium">Checked</th>
+                    <th className="px-4 py-2.5 font-medium text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-200/60 dark:divide-zinc-800/60">
+                  {accounts.map((a) => (
+                    <tr key={a.id} className="hover:bg-zinc-50/80 dark:hover:bg-zinc-900/40">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-zinc-900 dark:text-zinc-100">
+                          {a.label}
+                        </div>
+                        <div className="text-[11px] text-zinc-400">{a.auth_mode}</div>
+                      </td>
+                      <td className="px-4 py-3 text-zinc-700 dark:text-zinc-300">
+                        {a.railway_user || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
+                        {a.workspace || "default"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={a.status} />
+                      </td>
+                      <td className="px-4 py-3 text-zinc-500 dark:text-zinc-400">
+                        {formatTime(a.last_checked_at || a.created_at)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="inline-flex items-center gap-1.5">
+                          <Button variant="outline" size="sm" onClick={() => verify(a.id)}>
+                            <ShieldCheck className="h-3.5 w-3.5" />
+                            Verify
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => toggle(a.id)}>
+                            <Power className="h-3.5 w-3.5" />
+                            {a.status === "active" ? "Disable" : "Enable"}
+                          </Button>
+                          <Button variant="danger" size="sm" onClick={() => remove(a.id)}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </Card>
     </AdminShell>
   );
 }

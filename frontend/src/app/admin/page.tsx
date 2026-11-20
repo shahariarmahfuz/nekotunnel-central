@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw, Terminal } from "lucide-react";
+import { Activity, Cloud, KeyRound, RefreshCw, Server, Terminal } from "lucide-react";
 import { AdminShell } from "@/components/AdminShell";
 import { CopyButton } from "@/components/CopyButton";
+import { Button, Card, CardContent, CardHeader, EmptyState, Notice } from "@/components/ui/primitives";
 import { apiFetch, formatTime } from "@/lib/api";
 
 type OverviewResponse = {
@@ -56,160 +57,218 @@ export default function AdminOverviewPage() {
     return () => clearInterval(timer);
   }, [load]);
 
-  const vmCommand = `sudo curl -fsSL ${origin}/client/nekotunnel -o /usr/local/bin/nekotunnel && sudo chmod +x /usr/local/bin/nekotunnel && nekotunnel token YOUR_USER_TOKEN ${origin} && nekotunnel tcp 22`;
-
-  const cards = data
-    ? [
-        { label: "Free Slots", value: data.counts.free_slots, tone: "text-emerald-600 dark:text-emerald-400" },
-        { label: "Busy Slots", value: data.counts.busy_slots, tone: "text-cyan-600 dark:text-cyan-400" },
-        { label: "Active Sessions", value: data.counts.active_sessions, tone: "text-emerald-700 dark:text-emerald-300" },
-        { label: "TCP Pending", value: data.counts.pending_slots, tone: "text-amber-600 dark:text-amber-400" },
-        { label: "Deploying", value: data.counts.deploying_slots, tone: "text-amber-600 dark:text-amber-300" },
-        { label: "Failed Slots", value: data.counts.failed_slots, tone: "text-rose-600 dark:text-rose-400" },
-        { label: "Railway Accounts", value: data.counts.accounts, tone: "text-slate-900 dark:text-slate-200" },
-        { label: "User Tokens", value: data.counts.users, tone: "text-slate-900 dark:text-slate-200" },
-      ]
-    : [];
+  const vmInstall = `sudo curl -fsSL ${origin}/client/nekotunnel -o /usr/local/bin/nekotunnel && sudo chmod +x /usr/local/bin/nekotunnel`;
 
   return (
     <AdminShell
-      title="Dashboard Overview"
-      subtitle="Live pool capacity, internal system status, and recent activity"
+      title="Overview"
+      subtitle="Live tunnel pool capacity and control plane status"
       actions={
-        <button
-          type="button"
-          onClick={load}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-800"
-        >
+        <Button variant="outline" size="sm" onClick={load}>
           <RefreshCw className="h-3.5 w-3.5" />
           Refresh
-        </button>
+        </Button>
       }
     >
       {error && (
-        <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-700 dark:text-rose-300">
+        <Notice tone="error" className="mb-4">
           {error}
-        </div>
+        </Notice>
       )}
 
-      {/* Metrics Grid */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {cards.map((c) => (
-          <div
-            key={c.label}
-            className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800/90 dark:bg-[#0b1120]"
-          >
-            <div className={`text-2xl font-bold tabular-nums ${c.tone}`}>
-              {c.value}
-            </div>
-            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              {c.label}
-            </div>
+      {/* Primary KPIs */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 dark:border-zinc-800/80 dark:bg-zinc-900/50">
+          <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+            <span>Free Slots</span>
+            <Server className="h-3.5 w-3.5" />
           </div>
-        ))}
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-2xl font-semibold tracking-tight tabular-nums">
+              {data ? data.counts.free_slots : "—"}
+            </span>
+            {data && data.counts.busy_slots > 0 && (
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                {data.counts.busy_slots} busy
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 dark:border-zinc-800/80 dark:bg-zinc-900/50">
+          <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+            <span>Active Tunnels</span>
+            <Activity className="h-3.5 w-3.5" />
+          </div>
+          <div className="mt-2 text-2xl font-semibold tracking-tight tabular-nums">
+            {data ? data.counts.active_sessions : "—"}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 dark:border-zinc-800/80 dark:bg-zinc-900/50">
+          <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+            <span>Railway Accounts</span>
+            <Cloud className="h-3.5 w-3.5" />
+          </div>
+          <div className="mt-2 text-2xl font-semibold tracking-tight tabular-nums">
+            {data ? data.counts.accounts : "—"}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 dark:border-zinc-800/80 dark:bg-zinc-900/50">
+          <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+            <span>User Tokens</span>
+            <KeyRound className="h-3.5 w-3.5" />
+          </div>
+          <div className="mt-2 text-2xl font-semibold tracking-tight tabular-nums">
+            {data ? data.counts.users : "—"}
+          </div>
+        </div>
       </div>
 
-      {/* System Status + Quick VM Command */}
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800/90 dark:bg-[#0b1120]">
-          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
-            Runtime Health
-          </h2>
-          <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60">
-              <div className="text-slate-500 dark:text-slate-400">Railway CLI</div>
-              <div className="mt-1 font-semibold">
+      {/* Bento Grid: VM CLI + Runtime Health */}
+      <div className="mt-4 grid gap-4 lg:grid-cols-12">
+        <Card className="lg:col-span-7">
+          <CardHeader
+            title={
+              <span className="flex items-center gap-2">
+                <Terminal className="h-4 w-4 text-zinc-500" />
+                VM CLI Setup
+              </span>
+            }
+            description="Install once on any Linux VM, save your token, then forward any port on demand"
+            action={<CopyButton text={vmInstall} label="Copy Install" />}
+          />
+          <CardContent className="space-y-3">
+            <pre className="overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-950 p-3 text-[11px] leading-relaxed text-zinc-100 dark:border-zinc-800">
+              {vmInstall}
+            </pre>
+            <div className="grid gap-2 text-xs text-zinc-600 dark:text-zinc-400 sm:grid-cols-2">
+              <div className="rounded-xl border border-zinc-200/80 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/60">
+                <div className="text-[11px] text-zinc-400">1. Save token once</div>
+                <code className="mt-0.5 block break-all text-zinc-800 dark:text-zinc-200">
+                  nekotunnel token YOUR_TOKEN {origin}
+                </code>
+              </div>
+              <div className="rounded-xl border border-zinc-200/80 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/60">
+                <div className="text-[11px] text-zinc-400">2. Forward any port</div>
+                <code className="mt-0.5 block text-zinc-800 dark:text-zinc-200">
+                  nekotunnel tcp 22 <span className="text-zinc-400">or</span> 3000
+                </code>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-5">
+          <CardHeader
+            title="Runtime Status"
+            description="Backend worker & slot configuration"
+          />
+          <CardContent className="grid grid-cols-2 gap-2.5 text-xs">
+            <div className="rounded-xl border border-zinc-200/80 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
+              <div className="text-zinc-500 dark:text-zinc-400">Railway CLI</div>
+              <div className="mt-1 font-medium">
                 {data?.system.railway_cli ? (
-                  <span className="text-emerald-600 dark:text-emerald-400">Installed & Ready</span>
+                  <span className="text-emerald-600 dark:text-emerald-400">Ready</span>
                 ) : (
-                  <span className="text-amber-600 dark:text-amber-400">Not found (manual slots OK)</span>
+                  <span className="text-amber-600 dark:text-amber-400">Unavailable</span>
                 )}
               </div>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60">
-              <div className="text-slate-500 dark:text-slate-400">FRP Version</div>
-              <div className="mt-1 font-mono font-semibold text-slate-900 dark:text-slate-200">
+            <div className="rounded-xl border border-zinc-200/80 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
+              <div className="text-zinc-500 dark:text-zinc-400">FRP Engine</div>
+              <div className="mt-1 font-mono font-medium">
                 v{data?.system.frp_version ?? "0.57.0"}
               </div>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60">
-              <div className="text-slate-500 dark:text-slate-400">Session Heartbeat TTL</div>
-              <div className="mt-1 font-semibold text-slate-900 dark:text-slate-200">
+            <div className="rounded-xl border border-zinc-200/80 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
+              <div className="text-zinc-500 dark:text-zinc-400">Pending / Failed</div>
+              <div className="mt-1 font-medium tabular-nums">
+                {data
+                  ? `${data.counts.pending_slots + data.counts.deploying_slots} / ${data.counts.failed_slots}`
+                  : "—"}
+              </div>
+            </div>
+            <div className="rounded-xl border border-zinc-200/80 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
+              <div className="text-zinc-500 dark:text-zinc-400">Heartbeat TTL</div>
+              <div className="mt-1 font-medium tabular-nums">
                 {data?.system.session_ttl_seconds ?? 90}s
               </div>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60">
-              <div className="text-slate-500 dark:text-slate-400">Railway Internal Port</div>
-              <div className="mt-1 font-mono font-semibold text-slate-900 dark:text-slate-200">
-                {data?.system.tcp_internal_port ?? 8080}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800/90 dark:bg-[#0b1120]">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-              <Terminal className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-              VM Quick Connect Command
-            </h2>
-            <CopyButton text={vmCommand} label="Copy Command" />
-          </div>
-          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-            Run on your target VM to expose SSH (port 22) through an available Railway slot:
-          </p>
-          <pre className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-slate-900 p-3 text-xs text-emerald-300 dark:border-slate-800 dark:bg-slate-950">
-            {vmCommand}
-          </pre>
-        </section>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Audit Logs */}
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800/90 dark:bg-[#0b1120]">
-        <div className="border-b border-slate-200 px-5 py-3.5 dark:border-slate-800/80">
-          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
-            Recent Audit Logs
-          </h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-800/80 dark:bg-slate-900/40 dark:text-slate-400">
-              <tr>
-                <th className="px-4 py-3 font-medium">Time</th>
-                <th className="px-4 py-3 font-medium">Actor</th>
-                <th className="px-4 py-3 font-medium">Action</th>
-                <th className="px-4 py-3 font-medium">Details</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-slate-800/60">
-              {data?.logs.length ? (
-                data.logs.map((log) => (
-                  <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/30">
-                    <td className="whitespace-nowrap px-4 py-2.5 text-slate-500 dark:text-slate-400">
-                      {formatTime(log.created_at)}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-900 dark:text-slate-200">
-                      {log.actor}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 font-mono text-emerald-700 dark:text-emerald-300">
+      {/* Recent Activity */}
+      <Card className="mt-4 overflow-hidden">
+        <CardHeader title="Recent Activity" />
+        {!data?.logs.length ? (
+          <EmptyState
+            icon={<Activity className="h-4 w-4" />}
+            title="No recent events"
+            description="Slot deployments, token creations, and tunnel connections will appear here."
+          />
+        ) : (
+          <>
+            {/* Mobile Cards */}
+            <div className="divide-y divide-zinc-200/80 dark:divide-zinc-800/80 md:hidden">
+              {data.logs.map((log) => (
+                <div key={log.id} className="space-y-1 p-4 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono font-medium text-zinc-900 dark:text-zinc-100">
                       {log.action}
-                    </td>
-                    <td className="max-w-md truncate px-4 py-2.5 text-slate-600 dark:text-slate-400">
-                      {log.details || "—"}
-                    </td>
+                    </span>
+                    <span className="text-[11px] text-zinc-400">
+                      {formatTime(log.created_at)}
+                    </span>
+                  </div>
+                  <div className="text-zinc-500 dark:text-zinc-400">
+                    Actor: <span className="text-zinc-700 dark:text-zinc-300">{log.actor}</span>
+                  </div>
+                  {log.details && (
+                    <div className="break-all text-[11px] text-zinc-500 dark:text-zinc-400">
+                      {log.details}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop Table */}
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-zinc-200/80 bg-zinc-50/80 text-zinc-500 dark:border-zinc-800/80 dark:bg-zinc-900/80 dark:text-zinc-400">
+                  <tr>
+                    <th className="px-4 py-2.5 font-medium">Time</th>
+                    <th className="px-4 py-2.5 font-medium">Actor</th>
+                    <th className="px-4 py-2.5 font-medium">Action</th>
+                    <th className="px-4 py-2.5 font-medium">Details</th>
                   </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={4} className="px-4 py-6 text-center text-slate-500">
-                    No activity logged yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                </thead>
+                <tbody className="divide-y divide-zinc-200/60 dark:divide-zinc-800/60">
+                  {data.logs.map((log) => (
+                    <tr key={log.id} className="hover:bg-zinc-50/80 dark:hover:bg-zinc-900/40">
+                      <td className="whitespace-nowrap px-4 py-2.5 text-zinc-500 dark:text-zinc-400">
+                        {formatTime(log.created_at)}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-2.5 font-medium">
+                        {log.actor}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-zinc-700 dark:text-zinc-300">
+                        {log.action}
+                      </td>
+                      <td className="max-w-md truncate px-4 py-2.5 text-zinc-500 dark:text-zinc-400">
+                        {log.details || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </Card>
     </AdminShell>
   );
 }

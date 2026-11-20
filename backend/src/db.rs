@@ -78,11 +78,13 @@ pub async fn init_schema(pool: &PgPool) -> Result<(), String> {
             name VARCHAR(120) NOT NULL,
             token_prefix VARCHAR(16) NOT NULL,
             token_hash VARCHAR(128) NOT NULL UNIQUE,
+            token_cipher TEXT NULL,
             status VARCHAR(30) NOT NULL DEFAULT 'active',
             max_sessions INTEGER NOT NULL DEFAULT 1,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         "#,
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS token_cipher TEXT NULL",
         "CREATE INDEX IF NOT EXISTS ix_users_token_prefix ON users (token_prefix)",
         "CREATE INDEX IF NOT EXISTS ix_users_status ON users (status)",
         r#"

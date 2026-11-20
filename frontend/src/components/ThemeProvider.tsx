@@ -23,9 +23,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const initial: Theme =
       saved === "light" || saved === "dark"
         ? saved
-        : window.matchMedia("(prefers-color-scheme: light)").matches
-        ? "light"
-        : "dark";
+        : window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light";
     setTheme(initial);
     document.documentElement.classList.toggle("dark", initial === "dark");
   }, []);
@@ -44,7 +44,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function ThemeToggle({ className = "" }: { className?: string }) {
+export function ThemeToggle({
+  compact = false,
+  className = "",
+}: {
+  compact?: boolean;
+  className?: string;
+}) {
   const { theme, toggleTheme } = useContext(ThemeContext);
 
   return (
@@ -53,17 +59,17 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
       onClick={toggleTheme}
       aria-label="Toggle color theme"
       title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
-      className={`inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 shadow-xs transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-800 ${className}`}
+      className={`inline-flex min-h-[34px] items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800 ${className}`}
     >
       {theme === "dark" ? (
         <>
           <Sun className="h-3.5 w-3.5 text-amber-400" />
-          <span>Light</span>
+          {!compact && <span>Light</span>}
         </>
       ) : (
         <>
-          <Moon className="h-3.5 w-3.5 text-indigo-600" />
-          <span>Dark</span>
+          <Moon className="h-3.5 w-3.5 text-zinc-600" />
+          {!compact && <span>Dark</span>}
         </>
       )}
     </button>

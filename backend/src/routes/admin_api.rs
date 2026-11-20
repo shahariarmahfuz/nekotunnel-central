@@ -15,8 +15,8 @@ use crate::{
         SlotSecretRow, UserDto,
     },
     security::{
-        encrypt_secret, make_user_token, sign_admin_session, token_hash, token_prefix,
-        verify_admin_session, verify_admin_token,
+        decrypt_secret, encrypt_secret, make_user_token, sign_admin_session, token_hash,
+        token_prefix, verify_admin_session, verify_admin_token,
     },
     services::{
         audit::record_audit,
@@ -44,6 +44,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/admin/accounts/{id}/toggle", post(toggle_account))
         .route("/api/admin/accounts/{id}", delete(delete_account))
         .route("/api/admin/users", get(list_users).post(create_user))
+        .route("/api/admin/users/{id}/token", get(reveal_user_token))
         .route("/api/admin/users/{id}/toggle", post(toggle_user))
         .route("/api/admin/users/{id}", delete(delete_user))
         .route("/api/admin/slots", get(list_slots))
@@ -469,7 +470,9 @@ async fn list_users(State(state): State<AppState>, headers: HeaderMap) -> impl I
 
     match sqlx::query_as::<_, UserDto>(
         r#"
-        SELECT u.id, u.name, u.token_prefix, u.status, u.max_sessions, u.created_at,
+        SELECT u.id, u.name, u.token_prefix,
+               (u.token_cipher IS NOT NULL) AS has_token,
+               u.status, u.max_sessions, u.created_at,
                COALESCE(COUNT(s.id) FILTER (WHERE s.status = 'active'), 0) AS active_sessions
         FROM users u
         LEFT JOIN sessions s ON s.user_id = u.id
@@ -517,18 +520,29 @@ async fn create_user(
     let raw_token = make_user_token();
     let prefix = token_prefix(&raw_token);
     let hash = token_hash(&state.config.app_secret, &raw_token);
+    let cipher = match encrypt_secret(&state.config.encryption_key, &raw_token) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "detail": e })),
+            )
+                .into_response()
+        }
+    };
     let id = Uuid::new_v4().to_string();
 
     let res = sqlx::query(
         r#"
-        INSERT INTO users (id, name, token_prefix, token_hash, status, max_sessions, created_at)
-        VALUES ($1, $2, $3, $4, 'active', $5, NOW())
+        INSERT INTO users (id, name, token_prefix, token_hash, token_cipher, status, max_sessions, created_at)
+        VALUES ($1, $2, $3, $4, $5, 'active', $6, NOW())
         "#,
     )
     .bind(&id)
     .bind(name)
     .bind(&prefix)
     .bind(&hash)
+    .bind(&cipher)
     .bind(max_sessions)
     .execute(&state.pool)
     .await;
@@ -554,6 +568,49 @@ async fn create_user(
         Json(json!({ "id": id, "token": raw_token })),
     )
         .into_response()
+}
+
+async fn reveal_user_token(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if let Err(err) = require_admin(&headers, &state) {
+        return err.into_response();
+    }
+
+    let row = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT token_cipher FROM users WHERE id = $1",
+    )
+    .bind(&id)
+    .fetch_optional(&state.pool)
+    .await;
+
+    match row {
+        Ok(Some(Some(cipher))) => match decrypt_secret(&state.config.encryption_key, &cipher) {
+            Ok(token) => (StatusCode::OK, Json(json!({ "token": token }))).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "detail": e })),
+            )
+                .into_response(),
+        },
+        Ok(Some(None)) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "detail": "Legacy token cannot be revealed. Create a new user token to enable reveal." })),
+        )
+            .into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "detail": "user not found" })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "detail": e.to_string() })),
+        )
+            .into_response(),
+    }
 }
 
 async fn toggle_user(
