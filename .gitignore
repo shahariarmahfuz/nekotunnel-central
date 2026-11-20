@@ -1,9 +1,22 @@
-__pycache__/
-*.py[cod]
+# Secrets & local environment
 .env
-.venv/
 .env.*
-*.db
+!.env.example
+
+# Rust
+backend/target
+**/target
+Cargo.lock.bak
+
+# Next.js / Node
+node_modules
+.next
+frontend/out
+npm-debug.log*
+
+# Runtime / temp
 /tmp/
 railway-slots/
+*.db
+*.log
 .DS_Store

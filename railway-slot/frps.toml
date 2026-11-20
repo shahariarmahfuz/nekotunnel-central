@@ -1,0 +1,18 @@
+bindAddr = "127.0.0.1"
+bindPort = 7000
+
+proxyBindAddr = "127.0.0.1"
+
+auth.method = "token"
+# Override via FRP_TOKEN env var in start.sh if set
+auth.token = "CHANGE_ME_TO_STRONG_RANDOM_TOKEN"
+
+[transport]
+heartbeatTimeout = 90
+tcpMux = true
+tcpMuxKeepaliveInterval = 30
+tcpKeepalive = 7200
+tls.force = true
+
+[[allowPorts]]
+single = 6000

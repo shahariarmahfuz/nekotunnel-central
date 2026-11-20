@@ -1,27 +1,98 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "${1:-}" != "tcp" ] || [ -z "${2:-}" ]; then
-    echo "❌ Usage: ./nekotunnel tcp <local_port> <user_token> [api_url]"
-    echo "👉 Example: ./nekotunnel tcp 22 ntk_xxx https://your-app.onrender.com"
-    exit 1
-fi
-
-LOCAL_PORT="$2"
+CMD="${1:-}"
+LOCAL_PORT="${2:-}"
 USER_TOKEN="${3:-${NEKOTUNNEL_TOKEN:-}}"
 API_URL="${4:-${NEKOTUNNEL_API_URL:-}}"
-FRP_VERSION="0.57.0"
-FRPC="/tmp/frpc-${FRP_VERSION}"
-CONFIG="/tmp/neko_config.toml"
-SESSION_ID=""
-FRPC_PID=""
-HEARTBEAT_PID=""
+API_URL="${API_URL%/}"
+
+FRP_VERSION="${FRP_VERSION:-0.57.0}"
+CONFIG_DIR="${HOME:-/tmp}/.cache/nekotunnel"
+mkdir -p "$CONFIG_DIR"
+
+usage() {
+    cat <<'EOF'
+NekoTunnel VM Client
+
+Usage:
+  ./nekotunnel tcp <local_port> <user_token> <api_url>
+  ./nekotunnel install <local_port> <user_token> <api_url>
+
+Environment variables (optional):
+  NEKOTUNNEL_TOKEN    User token (ntk_...)
+  NEKOTUNNEL_API_URL  Control panel URL (https://your-app.onrender.com)
+
+Examples:
+  ./nekotunnel tcp 22 ntk_xxx https://your-app.onrender.com
+  sudo ./nekotunnel install 22 ntk_xxx https://your-app.onrender.com
+EOF
+}
+
+if [ "$CMD" = "install" ]; then
+    if [ -z "$LOCAL_PORT" ] || [ -z "$USER_TOKEN" ] || [ -z "$API_URL" ]; then
+        usage
+        exit 1
+    fi
+    BIN_PATH="/usr/local/bin/nekotunnel"
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "❌ Run 'install' with sudo/root so systemd service can be written."
+        exit 1
+    fi
+    cp "$0" "$BIN_PATH"
+    chmod 0755 "$BIN_PATH"
+
+    cat > /etc/systemd/system/nekotunnel.service <<UNIT_EOF
+[Unit]
+Description=NekoTunnel Reverse TCP Agent (port $LOCAL_PORT)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=NEKOTUNNEL_TOKEN=$USER_TOKEN
+Environment=NEKOTUNNEL_API_URL=$API_URL
+ExecStart=$BIN_PATH tcp $LOCAL_PORT
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+    chmod 0600 /etc/systemd/system/nekotunnel.service
+    systemctl daemon-reload
+    systemctl enable --now nekotunnel
+    echo "✅ Installed & started systemd service 'nekotunnel'!"
+    echo "ℹ️  Check logs with: journalctl -u nekotunnel -f"
+    exit 0
+fi
+
+if [ "$CMD" != "tcp" ] || [ -z "$LOCAL_PORT" ]; then
+    usage
+    exit 1
+fi
 
 if [ -z "$USER_TOKEN" ] || [ -z "$API_URL" ]; then
     echo "❌ Missing token or API URL."
-    echo "Use: ./nekotunnel tcp 22 USER_TOKEN https://your-app.onrender.com"
+    usage
     exit 1
 fi
+
+case "$(uname -m)" in
+    x86_64|amd64) FRP_ARCH="amd64" ;;
+    aarch64|arm64) FRP_ARCH="arm64" ;;
+    *)
+        echo "❌ Unsupported architecture: $(uname -m)"
+        exit 1
+        ;;
+esac
+
+FRPC="${CONFIG_DIR}/frpc-${FRP_VERSION}-${FRP_ARCH}"
+CONFIG="${CONFIG_DIR}/neko_${LOCAL_PORT}.toml"
+SESSION_ID=""
+FRPC_PID=""
+HEARTBEAT_PID=""
+STOPPING=0
 
 json_value() {
     python3 -c "import json,sys; print(json.load(sys.stdin).get('$1',''))"
@@ -30,56 +101,85 @@ json_value() {
 api_post() {
     local path="$1"
     local payload="$2"
-    curl -fsS -X POST "$API_URL$path" \
+    curl -sS -w "\n%{http_code}" -X POST "$API_URL$path" \
       -H 'Content-Type: application/json' \
       --data "$payload"
 }
 
-cleanup() {
-    echo -e "\n🛑 Disconnecting gracefully..."
+stop_session_processes() {
     if [ -n "$HEARTBEAT_PID" ]; then
         kill "$HEARTBEAT_PID" 2>/dev/null || true
         wait "$HEARTBEAT_PID" 2>/dev/null || true
+        HEARTBEAT_PID=""
     fi
     if [ -n "$FRPC_PID" ] && kill -0 "$FRPC_PID" 2>/dev/null; then
         kill -TERM "$FRPC_PID" 2>/dev/null || true
         wait "$FRPC_PID" 2>/dev/null || true
+        FRPC_PID=""
     fi
     if [ -n "$SESSION_ID" ]; then
-        api_post "/api/disconnect" "{\"token\":\"$USER_TOKEN\",\"session_id\":\"$SESSION_ID\"}" >/dev/null 2>&1 || true
+        curl -sS -X POST "$API_URL/api/disconnect" \
+          -H 'Content-Type: application/json' \
+          --data "{\"token\":\"$USER_TOKEN\",\"session_id\":\"$SESSION_ID\"}" >/dev/null 2>&1 || true
+        SESSION_ID=""
     fi
+    rm -f "$CONFIG"
+}
+
+cleanup() {
+    STOPPING=1
+    echo -e "\n🛑 Disconnecting gracefully..."
+    stop_session_processes
     echo "✅ Connection closed cleanly."
     exit 0
 }
-trap cleanup INT TERM EXIT
+trap cleanup INT TERM
 
 if [ ! -x "$FRPC" ]; then
-    echo "📥 Downloading FRP client..."
-    wget -q -O /tmp/frp.tar.gz "https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_amd64.tar.gz"
-    tar -xzf /tmp/frp.tar.gz -C /tmp
-    mv "/tmp/frp_${FRP_VERSION}_linux_amd64/frpc" "$FRPC"
-    chmod +x "$FRPC"
+    echo "📥 Downloading FRP client v${FRP_VERSION} (${FRP_ARCH})..."
+    TMP_TAR="$(mktemp)"
+    TMP_DIR="$(mktemp -d)"
+    curl -fsSL -o "$TMP_TAR" "https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz"
+    tar -xzf "$TMP_TAR" -C "$TMP_DIR"
+    mv "${TMP_DIR}/frp_${FRP_VERSION}_linux_${FRP_ARCH}/frpc" "$FRPC"
+    chmod 0755 "$FRPC"
+    rm -rf "$TMP_TAR" "$TMP_DIR"
 fi
 
-echo "⚡ Requesting available tunnel slot..."
-RESP="$(api_post "/api/connect" "{\"token\":\"$USER_TOKEN\",\"local_port\":$LOCAL_PORT}")" || {
-    echo "❌ Could not get slot. Response from server failed."
-    exit 1
-}
+while [ "$STOPPING" -eq 0 ]; do
+    echo "⚡ Requesting available tunnel slot from $API_URL..."
+    RAW_RESP="$(api_post "/api/connect" "{\"token\":\"$USER_TOKEN\",\"local_port\":$LOCAL_PORT}")" || {
+        echo "⚠️  Network request failed. Retrying in 5s..."
+        sleep 5
+        continue
+    }
 
-SESSION_ID="$(printf '%s' "$RESP" | json_value session_id)"
-SERVER_ADDR="$(printf '%s' "$RESP" | json_value server_addr)"
-SERVER_PORT="$(printf '%s' "$RESP" | json_value server_port)"
-FRP_TOKEN="$(printf '%s' "$RESP" | json_value frp_token)"
-REMOTE_PORT="$(printf '%s' "$RESP" | json_value remote_port)"
-PROXY_NAME="$(printf '%s' "$RESP" | json_value proxy_name)"
+    HTTP_CODE="$(printf '%s' "$RAW_RESP" | tail -n1)"
+    RESP="$(printf '%s' "$RAW_RESP" | sed '$d')"
 
-if [ -z "$SESSION_ID" ] || [ -z "$SERVER_ADDR" ] || [ -z "$SERVER_PORT" ] || [ -z "$FRP_TOKEN" ]; then
-    echo "❌ Invalid API response: $RESP"
-    exit 1
-fi
+    if [ "$HTTP_CODE" != "200" ]; then
+        echo "❌ Server returned HTTP $HTTP_CODE: $RESP"
+        echo "⏳ Retrying in 10s..."
+        sleep 10
+        continue
+    fi
 
-cat > "$CONFIG" <<CONFIG_EOF
+    SESSION_ID="$(printf '%s' "$RESP" | json_value session_id)"
+    SERVER_ADDR="$(printf '%s' "$RESP" | json_value server_addr)"
+    SERVER_PORT="$(printf '%s' "$RESP" | json_value server_port)"
+    FRP_TOKEN="$(printf '%s' "$RESP" | json_value frp_token)"
+    REMOTE_PORT="$(printf '%s' "$RESP" | json_value remote_port)"
+    PROXY_NAME="$(printf '%s' "$RESP" | json_value proxy_name)"
+
+    if [ -z "$SESSION_ID" ] || [ -z "$SERVER_ADDR" ] || [ -z "$SERVER_PORT" ] || [ -z "$FRP_TOKEN" ]; then
+        echo "❌ Invalid API response: $RESP"
+        sleep 10
+        continue
+    fi
+
+    (
+        umask 077
+        cat > "$CONFIG" <<CONFIG_EOF
 serverAddr = "$SERVER_ADDR"
 serverPort = $SERVER_PORT
 
@@ -104,20 +204,34 @@ localIP = "127.0.0.1"
 localPort = $LOCAL_PORT
 remotePort = $REMOTE_PORT
 CONFIG_EOF
+    )
 
-(
-  while true; do
-    sleep 15
-    api_post "/api/heartbeat" "{\"token\":\"$USER_TOKEN\",\"session_id\":\"$SESSION_ID\"}" >/dev/null 2>&1 || true
-  done
-) &
-HEARTBEAT_PID=$!
+    (
+        while true; do
+            sleep 15
+            HB_CODE="$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$API_URL/api/heartbeat" \
+              -H 'Content-Type: application/json' \
+              --data "{\"token\":\"$USER_TOKEN\",\"session_id\":\"$SESSION_ID\"}" || echo "000")"
+            if [ "$HB_CODE" = "404" ] || [ "$HB_CODE" = "401" ]; then
+                echo "⚠️  Session expired/closed on server (HTTP $HB_CODE)."
+                break
+            fi
+        done
+    ) &
+    HEARTBEAT_PID=$!
 
-echo "✅ Slot assigned: $SERVER_ADDR:$SERVER_PORT"
-echo "🌍 Users can connect using:"
-echo "➡️  ssh username@$SERVER_ADDR -p $SERVER_PORT"
-echo "--------------------------------------------------"
+    echo "✅ Slot assigned: $SERVER_ADDR:$SERVER_PORT (local 127.0.0.1:$LOCAL_PORT)"
+    echo "🌍 Connect with:"
+    echo "➡️  ssh <user>@$SERVER_ADDR -p $SERVER_PORT"
+    echo "--------------------------------------------------"
 
-"$FRPC" -c "$CONFIG" &
-FRPC_PID=$!
-wait "$FRPC_PID"
+    "$FRPC" -c "$CONFIG" &
+    FRPC_PID=$!
+    wait "$FRPC_PID" || true
+
+    if [ "$STOPPING" -eq 0 ]; then
+        echo "⚠️  Tunnel disconnected unexpectedly. Reconnecting in 5s..."
+        stop_session_processes
+        sleep 5
+    fi
+done

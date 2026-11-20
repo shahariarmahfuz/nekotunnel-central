@@ -1,64 +1,73 @@
 # NekoTunnel Central
 
-FastAPI + PostgreSQL control panel for managing Railway FRP/SSLH tunnel slots.
+Rust (`axum` + `sqlx`) + Next.js control plane for managing self-hosted Railway FRP/SSLH reverse TCP tunnel slots.
 
-## What this includes
+## Architecture (Single Public Port for Render)
 
-- Admin dashboard for Railway API tokens, slots, users, and sessions.
-- PostgreSQL auto table creation at startup.
-- Encrypted Railway API tokens and FRP slot tokens.
-- `/api/connect`, `/api/heartbeat`, `/api/disconnect` for clients.
-- Railway CLI-based slot creation/deploy scaffold.
-- Render Docker deployment files.
+Render exposes only a single public HTTP port (`$PORT`). Inside the Docker container:
 
-## Required Render environment variables
+- **Public Gateway (`0.0.0.0:$PORT`)**: Next.js standalone App Router server (`frontend/`). Serves the admin dashboard and proxies `/api/*`, `/client/*`, and `/health` internally.
+- **Internal Backend (`127.0.0.1:8080`)**: Rust Axum server (`backend/`). Bound strictly to `127.0.0.1` so it is never exposed directly to the public internet.
+- **Database**: PostgreSQL (Neon or Render Postgres) with automatic advisory-locked table initialization on startup.
+- **Railway Slots (`railway-slot/`)**: Each slot container runs `sslh` + `frps` on one Railway TCP Proxy port (`8080`), multiplexing TLS-wrapped `frpc` tunnel traffic (`127.0.0.1:7000`) and incoming SSH/TCP user traffic (`127.0.0.1:6000`).
 
-Render will provide `DATABASE_URL` automatically if you deploy with the included `render.yaml` blueprint. Set or generate these:
+## Environment Variables
 
-```txt
-APP_SECRET=long_random_string
-ENCRYPTION_KEY=long_random_string
-ADMIN_TOKEN=long_random_admin_password
+Copy `.env.example` to `.env` for local development or configure these in Render:
+
+```env
+DATABASE_URL=postgresql://user:password@host/db?sslmode=require
+APP_SECRET=long-random-secret
+ENCRYPTION_KEY=long-random-encryption-key
+ADMIN_TOKEN=long-random-admin-password
 SESSION_TTL_SECONDS=90
 CLEANUP_INTERVAL_SECONDS=30
 ```
 
-Keep `ENCRYPTION_KEY` permanent. If it changes, old encrypted Railway/FRP tokens cannot be decrypted.
+Keep `ENCRYPTION_KEY` permanent — changing it prevents decrypting previously saved Railway API tokens and FRP slot tokens.
 
-## Deploy from GitHub to Render
+## Local Development
 
-1. Create a GitHub repo and push this project.
-2. In Render, create a Blueprint from the repo, or create a Web Service using Docker and attach a Render PostgreSQL database.
-3. Add the environment variables above.
-4. Open the Render URL and login with `ADMIN_TOKEN`.
+1. Start the internal Rust backend (`127.0.0.1:8080`):
+   ```bash
+   cd backend
+   cargo run
+   ```
+2. Start the Next.js frontend (`http://localhost:3000`):
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
 
-## First setup after deploy
+## Deploy to Render
 
-1. Go to **Railway Accounts** and add a workspace/account API token.
-2. Go to **Users** and create a user token. Copy it immediately.
-3. Go to **Slots**.
-   - Either add a manual slot from an already working Railway project.
-   - Or use **Create Railway Slot** to create/deploy a new Railway project.
-4. If the slot is `tcp_pending`, open that Railway service and enable TCP Proxy with internal port `8080`, then click **Refresh TCP**.
-5. Download the client from `/client/nekotunnel` or use the included `client/nekotunnel` file.
+1. Push this repository to GitHub.
+2. Create a Web Service on Render using **Docker** (or Blueprint from `render.yaml`).
+3. Set `DATABASE_URL` (Neon or Render Postgres), `APP_SECRET`, `ENCRYPTION_KEY`, and `ADMIN_TOKEN`.
+4. Open your Render URL and sign in with `ADMIN_TOKEN`.
 
-## Client usage
+## VM Client Usage
+
+Download and run on your target Linux VM:
 
 ```bash
+curl -fsSL https://your-render-app.onrender.com/client/nekotunnel -o nekotunnel
 chmod +x nekotunnel
-./nekotunnel tcp 22 USER_TOKEN https://your-render-app.onrender.com
+./nekotunnel tcp 22 YOUR_USER_TOKEN https://your-render-app.onrender.com
 ```
 
-Or:
+Or install as a 24/7 `systemd` service:
 
 ```bash
-export NEKOTUNNEL_TOKEN="USER_TOKEN"
-export NEKOTUNNEL_API_URL="https://your-render-app.onrender.com"
-./nekotunnel tcp 22
+sudo ./nekotunnel install 22 YOUR_USER_TOKEN https://your-render-app.onrender.com
 ```
 
-## Notes
+## Manual Railway Slot Deployment (`railway-slot/`)
 
-- Railway TCP Proxy must be enabled with internal port `8080` for every slot.
-- The first version uses Railway CLI from inside the Docker container. If a CLI operation fails, add manual slots or refresh after enabling TCP Proxy.
-- This is a starter control plane; production hardening should add stronger admin auth, role-based access, HTTPS-only cookies, rate limits, and backups.
+If you prefer creating a slot directly in Railway without Railway CLI automation:
+
+1. Deploy the `railway-slot/` directory as a Railway service.
+2. Set `FRP_TOKEN` in Railway service variables (or let the manual slot form generate one, then copy it into Railway).
+3. Enable **TCP Proxy** in Railway Networking pointing to internal port `8080`.
+4. Register the generated `<host>:<port>` and `FRP_TOKEN` under **Tunnel Slots → Add Manual Slot**.
