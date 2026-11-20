@@ -22,8 +22,8 @@ use crate::{
         audit::record_audit,
         railway::{
             check_railway_cli_available, create_and_deploy_slot, fetch_whoami,
-            inspect_slot_railway, prepare_account_auth, random_frp_token, refresh_slot_tcp,
-            spawn_railway_cli_login,
+            inspect_slot_railway, prepare_account_auth, random_frp_token, redeploy_slot_railway,
+            refresh_slot_tcp, spawn_railway_cli_login,
         },
         sessions::terminate_session_admin,
     },
@@ -52,6 +52,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/admin/slots/manual", post(add_manual_slot))
         .route("/api/admin/slots/create", post(create_railway_slots))
         .route("/api/admin/slots/{id}/refresh", post(refresh_slot))
+        .route("/api/admin/slots/{id}/redeploy", post(redeploy_slot))
         .route("/api/admin/slots/{id}/inspect", get(inspect_slot))
         .route("/api/admin/slots/{id}/free", post(force_free_slot))
         .route("/api/admin/slots/{id}", delete(delete_slot))
@@ -984,6 +985,63 @@ async fn inspect_slot(
 
     match inspect_slot_railway(&state.pool, &state.config, &slot, account.as_ref()).await {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+        Err(err) => (StatusCode::BAD_GATEWAY, Json(json!({ "detail": err }))).into_response(),
+    }
+}
+
+async fn redeploy_slot(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if let Err(err) = require_admin(&headers, &state) {
+        return err.into_response();
+    }
+
+    let slot = match sqlx::query_as::<_, SlotSecretRow>(
+        r#"
+        SELECT id, railway_account_id, project_name, project_id, service_name,
+               server_addr, server_port, frp_token_cipher, remote_port
+        FROM slots
+        WHERE id = $1
+        "#,
+    )
+    .bind(&id)
+    .fetch_optional(&state.pool)
+    .await
+    {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "detail": "slot not found" })),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "detail": e.to_string() })),
+            )
+                .into_response()
+        }
+    };
+
+    let account = if let Some(ref acct_id) = slot.railway_account_id {
+        sqlx::query_as::<_, RailwayAccountSecret>(
+            "SELECT id, label, workspace, api_token_cipher FROM railway_accounts WHERE id = $1",
+        )
+        .bind(acct_id)
+        .fetch_optional(&state.pool)
+        .await
+        .ok()
+        .flatten()
+    } else {
+        None
+    };
+
+    match redeploy_slot_railway(&state.pool, &state.config, &slot, account.as_ref()).await {
+        Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))).into_response(),
         Err(err) => (StatusCode::BAD_GATEWAY, Json(json!({ "detail": err }))).into_response(),
     }
 }

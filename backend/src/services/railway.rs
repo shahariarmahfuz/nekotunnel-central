@@ -539,6 +539,9 @@ single = 6000
     let start_sh = r#"#!/bin/sh
 set -eu
 
+SSLH_PID=""
+FRPS_PID=""
+
 cleanup() {
     kill -TERM "$SSLH_PID" "$FRPS_PID" 2>/dev/null || true
     wait "$SSLH_PID" 2>/dev/null || true
@@ -555,22 +558,38 @@ trap cleanup EXIT
 
 /frp/frps -c /frp/frps.toml &
 FRPS_PID=$!
+sleep 1
 
-if sslh -h 2>&1 | grep -q -- '--tls'; then
+if command -v sslh-select >/dev/null 2>&1; then
+    SSLH_BIN="sslh-select"
+else
+    SSLH_BIN="sslh"
+fi
+
+if "$SSLH_BIN" -h 2>&1 | grep -q -- '--tls'; then
     TLS_OPT="--tls"
 else
     TLS_OPT="--ssl"
 fi
 
-sslh -f -u root \
-  -p "0.0.0.0:${PORT:-8080}" \
-  --ssh "127.0.0.1:6000" \
-  "$TLS_OPT" "127.0.0.1:7000" \
-  --on-timeout ssh \
-  --timeout 2 &
-SSLH_PID=$!
+start_sslh() {
+    "$SSLH_BIN" -f -u root \
+      -p "0.0.0.0:${PORT:-8080}" \
+      --ssh "127.0.0.1:6000" \
+      "$TLS_OPT" "127.0.0.1:7000" \
+      --on-timeout ssh \
+      --timeout 2 &
+    SSLH_PID=$!
+}
 
-while kill -0 "$FRPS_PID" 2>/dev/null && kill -0 "$SSLH_PID" 2>/dev/null; do
+start_sslh
+
+while kill -0 "$FRPS_PID" 2>/dev/null; do
+    if ! kill -0 "$SSLH_PID" 2>/dev/null; then
+        echo "[slot] sslh exited, restarting..." >&2
+        sleep 1
+        start_sslh
+    fi
     sleep 2
 done
 
@@ -1224,6 +1243,87 @@ pub async fn inspect_slot_railway(
         "deployments": dep_out.as_deref().unwrap_or_else(|e| e),
         "logs": log_out.as_deref().unwrap_or_else(|e| e),
     }))
+}
+
+pub async fn redeploy_slot_railway(
+    pool: &PgPool,
+    config: &Config,
+    slot: &SlotSecretRow,
+    account: Option<&RailwayAccountSecret>,
+) -> Result<(), String> {
+    let Some(acct) = account else {
+        return Err("No Railway account attached to this slot.".to_string());
+    };
+    let auth = prepare_account_auth(config, acct)?;
+    let frp_token = decrypt_secret(&config.encryption_key, &slot.frp_token_cipher)?;
+    let slot_dir = PathBuf::from(&config.slot_work_root).join(&slot.project_name);
+    write_slot_files(&slot_dir, &frp_token, &config.frp_version)?;
+
+    let mut project_id = slot.project_id.clone();
+    if project_id.is_none() {
+        project_id = resolve_project_id(
+            &config.railway_cli_path,
+            &auth,
+            &slot.project_name,
+            Some(&slot_dir),
+        )
+        .await;
+        if let Some(ref pid) = project_id {
+            let _ = sqlx::query("UPDATE slots SET project_id = $1, updated_at = NOW() WHERE id = $2")
+                .bind(pid)
+                .bind(&slot.id)
+                .execute(pool)
+                .await;
+        }
+    }
+
+    let Some(ref pid) = project_id else {
+        return Err("Could not resolve Railway project ID for redeploy.".to_string());
+    };
+
+    run_railway_cmd(
+        &config.railway_cli_path,
+        &["link", "-p", pid, "-e", "production", "-s", &slot.service_name],
+        &auth,
+        Some(&slot_dir),
+        30,
+    )
+    .await?;
+
+    run_railway_cmd(
+        &config.railway_cli_path,
+        &["up", "-s", &slot.service_name, "--detach"],
+        &auth,
+        Some(&slot_dir),
+        900,
+    )
+    .await?;
+
+    let _ = sqlx::query(
+        r#"
+        UPDATE slots
+        SET last_error = NULL,
+            status = CASE
+                WHEN server_addr IS NOT NULL AND server_port IS NOT NULL THEN 'free'
+                ELSE 'tcp_pending'
+            END,
+            updated_at = NOW()
+        WHERE id = $1
+        "#,
+    )
+    .bind(&slot.id)
+    .execute(pool)
+    .await;
+
+    let _ = record_audit(
+        pool,
+        "admin",
+        "slot_redeployed",
+        Some(&format!("project={}", slot.project_name)),
+    )
+    .await;
+
+    Ok(())
 }
 
 #[cfg(test)]

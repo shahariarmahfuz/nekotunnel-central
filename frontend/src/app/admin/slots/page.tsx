@@ -155,7 +155,7 @@ export default function SlotsPage() {
 
   const runSlotAction = async (
     id: string,
-    action: "refresh" | "free" | "delete"
+    action: "refresh" | "redeploy" | "free" | "delete"
   ) => {
     setError(null);
     setNotice(null);
@@ -166,6 +166,8 @@ export default function SlotsPage() {
         await apiFetch(`/api/admin/slots/${id}/${action}`, { method: "POST" });
         if (action === "refresh") {
           setNotice("TCP Proxy synced successfully!");
+        } else if (action === "redeploy") {
+          setNotice("Slot redeploy triggered with updated sslh-select image!");
         }
       }
       load();
@@ -411,6 +413,14 @@ export default function SlotsPage() {
                         >
                           <RefreshCw className="h-3.5 w-3.5" />
                           Refresh TCP
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => runSlotAction(s.id, "redeploy")}
+                        >
+                          <Rocket className="h-3.5 w-3.5" />
+                          Redeploy
                         </Button>
                         <Button
                           variant="secondary"
