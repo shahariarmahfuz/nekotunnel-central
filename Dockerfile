@@ -19,7 +19,7 @@ FROM node:22-bookworm-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
-    && npm install -g @railway/cli --no-audit --no-fund \
+    && curl -fsSL https://railway.com/install.sh | sh -s -- -y -b /usr/local/bin \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

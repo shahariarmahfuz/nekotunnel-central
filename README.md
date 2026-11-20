@@ -24,7 +24,13 @@ SESSION_TTL_SECONDS=90
 CLEANUP_INTERVAL_SECONDS=30
 ```
 
-Keep `ENCRYPTION_KEY` permanent — changing it prevents decrypting previously saved Railway API tokens and FRP slot tokens.
+Keep `ENCRYPTION_KEY` permanent — changing it prevents decrypting previously saved Railway CLI sessions and FRP slot tokens.
+
+## Features
+
+- **Railway CLI Browserless Login**: Connect Railway accounts directly via `railway login --browserless` from the dashboard (no manual Railway API token needed). Encrypted `.railway/config.json` sessions persist in PostgreSQL across Render restarts.
+- **Auto TCP Proxy**: Slot deployment automatically runs `railway tcp-proxy create --port 8080` to provision the public endpoint.
+- **Dark / Light Dual Mode**: Switchable UI theme persisted in `localStorage`.
 
 ## Local Development
 

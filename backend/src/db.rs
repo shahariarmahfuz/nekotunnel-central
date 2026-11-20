@@ -59,14 +59,18 @@ pub async fn init_schema(pool: &PgPool) -> Result<(), String> {
         CREATE TABLE IF NOT EXISTS railway_accounts (
             id VARCHAR(36) PRIMARY KEY,
             label VARCHAR(120) NOT NULL,
-            workspace VARCHAR(200) NOT NULL,
+            workspace VARCHAR(200) NOT NULL DEFAULT '',
             api_token_cipher TEXT NOT NULL,
+            auth_mode VARCHAR(30) NOT NULL DEFAULT 'cli_login',
+            railway_user VARCHAR(200) NULL,
             status VARCHAR(30) NOT NULL DEFAULT 'active',
             last_checked_at TIMESTAMPTZ NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         "#,
+        "ALTER TABLE railway_accounts ADD COLUMN IF NOT EXISTS auth_mode VARCHAR(30) NOT NULL DEFAULT 'cli_login'",
+        "ALTER TABLE railway_accounts ADD COLUMN IF NOT EXISTS railway_user VARCHAR(200) NULL",
         "CREATE INDEX IF NOT EXISTS ix_railway_accounts_status ON railway_accounts (status)",
         r#"
         CREATE TABLE IF NOT EXISTS users (

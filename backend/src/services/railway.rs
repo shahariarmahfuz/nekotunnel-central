@@ -2,9 +2,14 @@ use chrono::Utc;
 use rand::RngCore;
 use serde_json::Value;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio::sync::RwLock;
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -13,7 +18,14 @@ use crate::{
     models::{RailwayAccountSecret, SlotSecretRow},
     security::{decrypt_secret, encrypt_secret},
     services::audit::record_audit,
+    state::RailwayLoginJob,
 };
+
+#[derive(Clone)]
+pub enum RailwayAuth {
+    CliHome(PathBuf),
+    LegacyApiToken(String),
+}
 
 fn tail_chars(input: &str, max_chars: usize) -> String {
     let total = input.chars().count();
@@ -59,17 +71,62 @@ pub async fn check_railway_cli_available(cli_path: &str) -> bool {
     matches!(res, Ok(out) if out.status.success())
 }
 
+fn write_cli_config(home_dir: &Path, config_json: &str) -> Result<(), String> {
+    let railway_dir = home_dir.join(".railway");
+    std::fs::create_dir_all(&railway_dir)
+        .map_err(|e| format!("failed to create .railway dir: {e}"))?;
+    let config_path = railway_dir.join("config.json");
+    std::fs::write(&config_path, config_json)
+        .map_err(|e| format!("failed to write .railway/config.json: {e}"))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o600));
+    }
+
+    Ok(())
+}
+
+pub fn prepare_account_auth(
+    config: &Config,
+    account: &RailwayAccountSecret,
+) -> Result<RailwayAuth, String> {
+    let secret = decrypt_secret(&config.encryption_key, &account.api_token_cipher)?;
+    let trimmed = secret.trim();
+    if trimmed.starts_with('{') {
+        let home_dir = PathBuf::from(&config.slot_work_root)
+            .join("_homes")
+            .join(&account.id);
+        write_cli_config(&home_dir, trimmed)?;
+        Ok(RailwayAuth::CliHome(home_dir))
+    } else {
+        Ok(RailwayAuth::LegacyApiToken(trimmed.to_string()))
+    }
+}
+
 async fn run_railway_cmd(
     cli_path: &str,
     args: &[&str],
-    token: &str,
+    auth: &RailwayAuth,
     cwd: Option<&Path>,
     timeout_secs: u64,
 ) -> Result<String, String> {
     let mut cmd = Command::new(cli_path);
     cmd.args(args);
+    cmd.stdin(Stdio::null());
     cmd.env_remove("RAILWAY_TOKEN");
-    cmd.env("RAILWAY_API_TOKEN", token);
+    cmd.env_remove("RAILWAY_API_TOKEN");
+
+    match auth {
+        RailwayAuth::CliHome(home_dir) => {
+            cmd.env("HOME", home_dir);
+        }
+        RailwayAuth::LegacyApiToken(token) => {
+            cmd.env("RAILWAY_API_TOKEN", token);
+        }
+    }
+
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }
@@ -93,6 +150,342 @@ async fn run_railway_cmd(
     }
 
     Ok(combined)
+}
+
+fn strip_ansi(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for ch in chars.by_ref() {
+                    if ('@'..='~').contains(&ch) {
+                        break;
+                    }
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn parse_activation_line(line: &str) -> (Option<String>, Option<String>) {
+    let clean = strip_ansi(line);
+    let mut url: Option<String> = None;
+    let mut code: Option<String> = None;
+
+    for word in clean.split_whitespace() {
+        let trimmed = word.trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | ')'));
+        if trimmed.starts_with("https://railway.com/activate")
+            || trimmed.starts_with("https://railway.app/activate")
+        {
+            url = Some(trimmed.to_string());
+            if let Some(pos) = trimmed.find("user_code=") {
+                let c = &trimmed[pos + "user_code=".len()..];
+                let code_part = c.split('&').next().unwrap_or("");
+                if !code_part.is_empty() {
+                    code = Some(code_part.to_string());
+                }
+            }
+        } else if trimmed.len() == 9
+            && trimmed.as_bytes().get(4) == Some(&b'-')
+            && trimmed
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-')
+        {
+            code = Some(trimmed.to_string());
+        }
+    }
+
+    (url, code)
+}
+
+fn parse_whoami_user(output: &str) -> Option<String> {
+    let clean = strip_ansi(output).trim().to_string();
+    if let Ok(val) = serde_json::from_str::<Value>(&clean) {
+        if let Some(email) = val.get("email").and_then(|v| v.as_str()) {
+            return Some(email.to_string());
+        }
+        if let Some(name) = val.get("name").and_then(|v| v.as_str()) {
+            return Some(name.to_string());
+        }
+        if let Some(user) = val.get("user") {
+            if let Some(email) = user.get("email").and_then(|v| v.as_str()) {
+                return Some(email.to_string());
+            }
+            if let Some(name) = user.get("name").and_then(|v| v.as_str()) {
+                return Some(name.to_string());
+            }
+        }
+    }
+    let first_line = clean.lines().next()?.trim();
+    if first_line.is_empty() {
+        None
+    } else {
+        Some(tail_chars(first_line, 180))
+    }
+}
+
+pub async fn fetch_whoami(cli_path: &str, auth: &RailwayAuth) -> Result<String, String> {
+    match run_railway_cmd(cli_path, &["whoami", "--json"], auth, None, 20).await {
+        Ok(out) => Ok(parse_whoami_user(&out).unwrap_or_else(|| "railway-user".to_string())),
+        Err(_) => {
+            let out = run_railway_cmd(cli_path, &["whoami"], auth, None, 20).await?;
+            Ok(parse_whoami_user(&out).unwrap_or_else(|| "railway-user".to_string()))
+        }
+    }
+}
+
+pub fn spawn_railway_cli_login(
+    pool: PgPool,
+    config: Config,
+    login_jobs: Arc<RwLock<HashMap<String, RailwayLoginJob>>>,
+    label: String,
+    workspace: String,
+) -> String {
+    let job_id = Uuid::new_v4().to_string();
+    let initial = RailwayLoginJob {
+        job_id: job_id.clone(),
+        label: label.clone(),
+        workspace: workspace.clone(),
+        status: "starting".to_string(),
+        activation_url: None,
+        user_code: None,
+        railway_user: None,
+        account_id: None,
+        error: None,
+    };
+
+    let jid = job_id.clone();
+    tokio::spawn(async move {
+        {
+            let mut map = login_jobs.write().await;
+            map.insert(jid.clone(), initial);
+        }
+
+        let login_home = PathBuf::from(&config.slot_work_root)
+            .join("_login_homes")
+            .join(&jid);
+        if let Err(e) = std::fs::create_dir_all(&login_home) {
+            let mut map = login_jobs.write().await;
+            if let Some(job) = map.get_mut(&jid) {
+                job.status = "failed".to_string();
+                job.error = Some(format!("failed to create login dir: {e}"));
+            }
+            return;
+        }
+
+        let mut cmd = Command::new(&config.railway_cli_path);
+        cmd.args(["login", "--browserless"])
+            .env("HOME", &login_home)
+            .env_remove("RAILWAY_TOKEN")
+            .env_remove("RAILWAY_API_TOKEN")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                let mut map = login_jobs.write().await;
+                if let Some(job) = map.get_mut(&jid) {
+                    job.status = "failed".to_string();
+                    job.error = Some(format!("failed to spawn railway CLI: {e}"));
+                }
+                return;
+            }
+        };
+
+        let jobs_stdout = login_jobs.clone();
+        let jid_out = jid.clone();
+        let stdout_task = child.stdout.take().map(|out| {
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(out).lines();
+                let mut collected = String::new();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let clean = strip_ansi(&line);
+                    collected.push_str(&clean);
+                    collected.push('\n');
+                    let (url, code) = parse_activation_line(&clean);
+                    if url.is_some() || code.is_some() {
+                        let mut map = jobs_stdout.write().await;
+                        if let Some(job) = map.get_mut(&jid_out) {
+                            if let Some(u) = url {
+                                job.activation_url = Some(u);
+                            }
+                            if let Some(c) = code {
+                                job.user_code = Some(c);
+                            }
+                            if job.status == "starting" {
+                                job.status = "awaiting_user".to_string();
+                            }
+                        }
+                    }
+                }
+                collected
+            })
+        });
+
+        let jobs_stderr = login_jobs.clone();
+        let jid_err = jid.clone();
+        let stderr_task = child.stderr.take().map(|err| {
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(err).lines();
+                let mut collected = String::new();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let clean = strip_ansi(&line);
+                    collected.push_str(&clean);
+                    collected.push('\n');
+                    let (url, code) = parse_activation_line(&clean);
+                    if url.is_some() || code.is_some() {
+                        let mut map = jobs_stderr.write().await;
+                        if let Some(job) = map.get_mut(&jid_err) {
+                            if let Some(u) = url {
+                                job.activation_url = Some(u);
+                            }
+                            if let Some(c) = code {
+                                job.user_code = Some(c);
+                            }
+                            if job.status == "starting" {
+                                job.status = "awaiting_user".to_string();
+                            }
+                        }
+                    }
+                }
+                collected
+            })
+        });
+
+        let wait_res = timeout(Duration::from_secs(300), child.wait()).await;
+        let out_text = match stdout_task {
+            Some(t) => t.await.unwrap_or_default(),
+            None => String::new(),
+        };
+        let err_text = match stderr_task {
+            Some(t) => t.await.unwrap_or_default(),
+            None => String::new(),
+        };
+
+        let exit_ok = match wait_res {
+            Ok(Ok(status)) => status.success(),
+            Ok(Err(e)) => {
+                let mut map = login_jobs.write().await;
+                if let Some(job) = map.get_mut(&jid) {
+                    job.status = "failed".to_string();
+                    job.error = Some(format!("railway login wait error: {e}"));
+                }
+                let _ = std::fs::remove_dir_all(&login_home);
+                return;
+            }
+            Err(_) => {
+                let _ = child.kill().await;
+                let mut map = login_jobs.write().await;
+                if let Some(job) = map.get_mut(&jid) {
+                    job.status = "failed".to_string();
+                    job.error = Some("Railway CLI login timed out (5 minutes).".to_string());
+                }
+                let _ = std::fs::remove_dir_all(&login_home);
+                return;
+            }
+        };
+
+        if !exit_ok {
+            let combined = format!("{out_text}\n{err_text}");
+            let mut map = login_jobs.write().await;
+            if let Some(job) = map.get_mut(&jid) {
+                job.status = "failed".to_string();
+                job.error = Some(tail_chars(combined.trim(), 1000));
+            }
+            let _ = std::fs::remove_dir_all(&login_home);
+            return;
+        }
+
+        let cfg_path = login_home.join(".railway").join("config.json");
+        let cfg_json = match std::fs::read_to_string(&cfg_path) {
+            Ok(c) if !c.trim().is_empty() => c,
+            Ok(_) | Err(_) => {
+                let mut map = login_jobs.write().await;
+                if let Some(job) = map.get_mut(&jid) {
+                    job.status = "failed".to_string();
+                    job.error = Some("Login succeeded but ~/.railway/config.json was not found.".to_string());
+                }
+                let _ = std::fs::remove_dir_all(&login_home);
+                return;
+            }
+        };
+
+        let railway_user = fetch_whoami(&config.railway_cli_path, &RailwayAuth::CliHome(login_home.clone()))
+            .await
+            .ok();
+
+        let cipher = match encrypt_secret(&config.encryption_key, &cfg_json) {
+            Ok(c) => c,
+            Err(e) => {
+                let mut map = login_jobs.write().await;
+                if let Some(job) = map.get_mut(&jid) {
+                    job.status = "failed".to_string();
+                    job.error = Some(e);
+                }
+                let _ = std::fs::remove_dir_all(&login_home);
+                return;
+            }
+        };
+
+        let account_id = Uuid::new_v4().to_string();
+        let insert_res = sqlx::query(
+            r#"
+            INSERT INTO railway_accounts
+                (id, label, workspace, api_token_cipher, auth_mode, railway_user, status, last_checked_at, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, 'cli_login', $5, 'active', NOW(), NOW(), NOW())
+            "#,
+        )
+        .bind(&account_id)
+        .bind(&label)
+        .bind(&workspace)
+        .bind(&cipher)
+        .bind(&railway_user)
+        .execute(&pool)
+        .await;
+
+        if let Err(e) = insert_res {
+            let mut map = login_jobs.write().await;
+            if let Some(job) = map.get_mut(&jid) {
+                job.status = "failed".to_string();
+                job.error = Some(format!("DB insert failed: {e}"));
+            }
+            let _ = std::fs::remove_dir_all(&login_home);
+            return;
+        }
+
+        let target_home = PathBuf::from(&config.slot_work_root)
+            .join("_homes")
+            .join(&account_id);
+        let _ = write_cli_config(&target_home, &cfg_json);
+        let _ = std::fs::remove_dir_all(&login_home);
+
+        let _ = record_audit(
+            &pool,
+            "admin",
+            "railway_cli_account_connected",
+            Some(&format!(
+                "label={label} user={}",
+                railway_user.as_deref().unwrap_or("unknown")
+            )),
+        )
+        .await;
+
+        let mut map = login_jobs.write().await;
+        if let Some(job) = map.get_mut(&jid) {
+            job.status = "completed".to_string();
+            job.account_id = Some(account_id);
+            job.railway_user = railway_user;
+        }
+    });
+
+    job_id
 }
 
 pub fn write_slot_files(slot_dir: &Path, frp_token: &str, frp_version: &str) -> Result<(), String> {
@@ -217,7 +610,6 @@ fn extract_project_id(output: &str) -> Option<String> {
         }
     }
 
-    // Fallback scan for UUID after project/ or project=
     for line in output.lines() {
         if let Some(idx) = line.find("project") {
             let slice = &line[idx..];
@@ -231,12 +623,85 @@ fn extract_project_id(output: &str) -> Option<String> {
     None
 }
 
-async fn collect_tcp_link(
+fn extract_tcp_proxy_from_json(output: &str) -> Option<(String, i32)> {
+    let parsed: Value = serde_json::from_str(output.trim()).ok()?;
+    let mut stack = vec![&parsed];
+    while let Some(node) = stack.pop() {
+        match node {
+            Value::Object(map) => {
+                let domain = map
+                    .get("domain")
+                    .or_else(|| map.get("proxyDomain"))
+                    .or_else(|| map.get("host"))
+                    .and_then(|v| v.as_str());
+                let port = map
+                    .get("proxyPort")
+                    .or_else(|| map.get("port"))
+                    .or_else(|| map.get("externalPort"))
+                    .and_then(|v| v.as_i64())
+                    .map(|p| p as i32);
+                if let (Some(d), Some(p)) = (domain, port) {
+                    if !d.is_empty() && (1..=65535).contains(&p) {
+                        return Some((d.to_string(), p));
+                    }
+                }
+                for v in map.values() {
+                    stack.push(v);
+                }
+            }
+            Value::Array(arr) => {
+                for v in arr {
+                    stack.push(v);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+async fn ensure_and_collect_tcp_link(
     cli_path: &str,
-    api_token: &str,
+    auth: &RailwayAuth,
     service_name: &str,
     project_id: Option<&str>,
+    internal_port: u16,
+    create_if_missing: bool,
 ) -> Result<(Option<String>, Option<i32>, Option<String>), String> {
+    let port_str = internal_port.to_string();
+
+    if create_if_missing {
+        let mut create_args = vec![
+            "tcp-proxy",
+            "create",
+            "--port",
+            &port_str,
+            "-s",
+            service_name,
+            "--json",
+        ];
+        if let Some(pid) = project_id {
+            create_args.push("-p");
+            create_args.push(pid);
+        }
+        if let Ok(out) = run_railway_cmd(cli_path, &create_args, auth, None, 60).await {
+            if let Some((host, port)) = extract_tcp_proxy_from_json(&out) {
+                return Ok((Some(host), Some(port), None));
+            }
+        }
+    }
+
+    let mut list_args = vec!["tcp-proxy", "list", "-s", service_name, "--json"];
+    if let Some(pid) = project_id {
+        list_args.push("-p");
+        list_args.push(pid);
+    }
+    if let Ok(out) = run_railway_cmd(cli_path, &list_args, auth, None, 60).await {
+        if let Some((host, port)) = extract_tcp_proxy_from_json(&out) {
+            return Ok((Some(host), Some(port), None));
+        }
+    }
+
     let mut args = vec!["run", "-s", service_name];
     if let Some(pid) = project_id {
         args.push("-p");
@@ -246,15 +711,15 @@ async fn collect_tcp_link(
     args.push("-c");
     args.push(r#"printf "%s:%s" "$RAILWAY_TCP_PROXY_DOMAIN" "$RAILWAY_TCP_PROXY_PORT""#);
 
-    let out = run_railway_cmd(cli_path, &args, api_token, None, 120).await?;
+    let out = run_railway_cmd(cli_path, &args, auth, None, 120).await?;
     let trimmed = out.trim();
-    if let Some((host, port_str)) = trimmed.rsplit_once(':') {
+    if let Some((host, p_str)) = trimmed.rsplit_once(':') {
         let valid_host = !host.is_empty()
             && host
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
         if valid_host {
-            if let Ok(port) = port_str.parse::<i32>() {
+            if let Ok(port) = p_str.parse::<i32>() {
                 if (1..=65535).contains(&port) {
                     return Ok((Some(host.to_string()), Some(port), None));
                 }
@@ -270,7 +735,7 @@ pub async fn create_and_deploy_slot(
     config: &Config,
     account: &RailwayAccountSecret,
 ) -> Result<String, String> {
-    let api_token = decrypt_secret(&config.encryption_key, &account.api_token_cipher)?;
+    let auth = prepare_account_auth(config, account)?;
     let stamp = Utc::now().timestamp();
     let label_slug = sanitize_slug(&account.label);
     let mut project_name = format!("nekotunnel-{label_slug}-{stamp}");
@@ -308,10 +773,18 @@ pub async fn create_and_deploy_slot(
     .await;
 
     let deploy_result: Result<(), String> = async {
+        let mut init_args = vec!["init", "-n", &project_name];
+        let ws = account.workspace.trim();
+        if !ws.is_empty() {
+            init_args.push("-w");
+            init_args.push(ws);
+        }
+        init_args.push("--json");
+
         let init_out = run_railway_cmd(
             &config.railway_cli_path,
-            &["init", "-n", &project_name, "-w", &account.workspace, "--json"],
-            &api_token,
+            &init_args,
+            &auth,
             Some(&slot_dir),
             300,
         )
@@ -330,7 +803,7 @@ pub async fn create_and_deploy_slot(
         if let Err(err) = run_railway_cmd(
             &config.railway_cli_path,
             &["add", "-s", &config.service_name],
-            &api_token,
+            &auth,
             Some(&slot_dir),
             180,
         )
@@ -344,19 +817,21 @@ pub async fn create_and_deploy_slot(
         run_railway_cmd(
             &config.railway_cli_path,
             &["up", "-s", &config.service_name, "--detach"],
-            &api_token,
+            &auth,
             Some(&slot_dir),
             900,
         )
         .await?;
 
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
 
-        match collect_tcp_link(
+        match ensure_and_collect_tcp_link(
             &config.railway_cli_path,
-            &api_token,
+            &auth,
             &config.service_name,
             project_id.as_deref(),
+            config.tcp_internal_port,
+            true,
         )
         .await
         {
@@ -457,12 +932,14 @@ pub async fn refresh_slot_tcp(
         return Err(msg.to_string());
     };
 
-    let api_token = decrypt_secret(&config.encryption_key, &acct.api_token_cipher)?;
-    match collect_tcp_link(
+    let auth = prepare_account_auth(config, acct)?;
+    match ensure_and_collect_tcp_link(
         &config.railway_cli_path,
-        &api_token,
+        &auth,
         &slot.service_name,
         slot.project_id.as_deref(),
+        config.tcp_internal_port,
+        true,
     )
     .await
     {
@@ -539,6 +1016,28 @@ mod tests {
         assert_eq!(
             extract_project_id("Created project/11112222-3333-4444-5555-666677778888 ok"),
             Some("11112222-3333-4444-5555-666677778888".to_string())
+        );
+    }
+
+    #[test]
+    fn activation_and_tcp_proxy_parsing() {
+        let (url, code) =
+            parse_activation_line("  https://railway.com/activate?user_code=CXDB-FQZH");
+        assert_eq!(
+            url.as_deref(),
+            Some("https://railway.com/activate?user_code=CXDB-FQZH")
+        );
+        assert_eq!(code.as_deref(), Some("CXDB-FQZH"));
+
+        let (_, code2) = parse_activation_line("  \x1b[36mABCD-1234\x1b[0m  ");
+        assert_eq!(code2.as_deref(), Some("ABCD-1234"));
+
+        let proxy = extract_tcp_proxy_from_json(
+            r#"[{"id":"tp_1","domain":"monorail.proxy.rlwy.net","proxyPort":45123}]"#,
+        );
+        assert_eq!(
+            proxy,
+            Some(("monorail.proxy.rlwy.net".to_string(), 45123))
         );
     }
 

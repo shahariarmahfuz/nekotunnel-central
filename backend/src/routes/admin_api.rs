@@ -21,7 +21,8 @@ use crate::{
     services::{
         audit::record_audit,
         railway::{
-            check_railway_cli_available, create_and_deploy_slot, random_frp_token, refresh_slot_tcp,
+            check_railway_cli_available, create_and_deploy_slot, fetch_whoami,
+            prepare_account_auth, random_frp_token, refresh_slot_tcp, spawn_railway_cli_login,
         },
         sessions::terminate_session_admin,
     },
@@ -36,7 +37,10 @@ pub fn router() -> Router<AppState> {
         .route("/api/admin/logout", post(admin_logout))
         .route("/api/admin/me", get(admin_me))
         .route("/api/admin/overview", get(admin_overview))
-        .route("/api/admin/accounts", get(list_accounts).post(add_account))
+        .route("/api/admin/accounts", get(list_accounts))
+        .route("/api/admin/accounts/login", post(start_account_login))
+        .route("/api/admin/accounts/login/{job_id}", get(get_account_login_status))
+        .route("/api/admin/accounts/{id}/verify", post(verify_account))
         .route("/api/admin/accounts/{id}/toggle", post(toggle_account))
         .route("/api/admin/accounts/{id}", delete(delete_account))
         .route("/api/admin/users", get(list_users).post(create_user))
@@ -254,7 +258,7 @@ async fn list_accounts(State(state): State<AppState>, headers: HeaderMap) -> imp
 
     match sqlx::query_as::<_, RailwayAccountDto>(
         r#"
-        SELECT id, label, workspace, status, last_checked_at, created_at, updated_at
+        SELECT id, label, workspace, auth_mode, railway_user, status, last_checked_at, created_at, updated_at
         FROM railway_accounts
         ORDER BY created_at DESC
         "#,
@@ -272,34 +276,96 @@ async fn list_accounts(State(state): State<AppState>, headers: HeaderMap) -> imp
 }
 
 #[derive(Deserialize)]
-struct AddAccountReq {
+struct StartCliLoginReq {
     label: String,
-    workspace: String,
-    api_token: String,
+    workspace: Option<String>,
 }
 
-async fn add_account(
+async fn start_account_login(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(req): Json<AddAccountReq>,
+    Json(req): Json<StartCliLoginReq>,
 ) -> impl IntoResponse {
     if let Err(err) = require_admin(&headers, &state) {
         return err.into_response();
     }
 
-    let label = req.label.trim();
-    let workspace = req.workspace.trim();
-    let api_token = req.api_token.trim();
-    if label.is_empty() || workspace.is_empty() || api_token.is_empty() {
+    let label = req.label.trim().to_string();
+    if label.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({ "detail": "label, workspace, and api_token are required" })),
+            Json(json!({ "detail": "label is required" })),
         )
             .into_response();
     }
 
-    let cipher = match encrypt_secret(&state.config.encryption_key, api_token) {
-        Ok(c) => c,
+    let workspace = req.workspace.unwrap_or_default().trim().to_string();
+    let job_id = spawn_railway_cli_login(
+        state.pool.clone(),
+        state.config.clone(),
+        state.login_jobs.clone(),
+        label,
+        workspace,
+    );
+
+    (StatusCode::ACCEPTED, Json(json!({ "job_id": job_id }))).into_response()
+}
+
+async fn get_account_login_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(job_id): Path<String>,
+) -> impl IntoResponse {
+    if let Err(err) = require_admin(&headers, &state) {
+        return err.into_response();
+    }
+
+    let map = state.login_jobs.read().await;
+    match map.get(&job_id) {
+        Some(job) => (StatusCode::OK, Json(json!(job))).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "detail": "login job not found" })),
+        )
+            .into_response(),
+    }
+}
+
+async fn verify_account(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if let Err(err) = require_admin(&headers, &state) {
+        return err.into_response();
+    }
+
+    let acct = match sqlx::query_as::<_, RailwayAccountSecret>(
+        "SELECT id, label, workspace, api_token_cipher FROM railway_accounts WHERE id = $1",
+    )
+    .bind(&id)
+    .fetch_optional(&state.pool)
+    .await
+    {
+        Ok(Some(a)) => a,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "detail": "account not found" })),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "detail": e.to_string() })),
+            )
+                .into_response()
+        }
+    };
+
+    let auth = match prepare_account_auth(&state.config, &acct) {
+        Ok(a) => a,
         Err(e) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -309,37 +375,19 @@ async fn add_account(
         }
     };
 
-    let id = Uuid::new_v4().to_string();
-    let res = sqlx::query(
-        r#"
-        INSERT INTO railway_accounts (id, label, workspace, api_token_cipher, status, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, 'active', NOW(), NOW())
-        "#,
-    )
-    .bind(&id)
-    .bind(label)
-    .bind(workspace)
-    .bind(&cipher)
-    .execute(&state.pool)
-    .await;
-
-    if let Err(e) = res {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "detail": e.to_string() })),
-        )
-            .into_response();
+    match fetch_whoami(&state.config.railway_cli_path, &auth).await {
+        Ok(who) => {
+            let _ = sqlx::query(
+                "UPDATE railway_accounts SET railway_user = $1, last_checked_at = NOW(), updated_at = NOW() WHERE id = $2",
+            )
+            .bind(&who)
+            .bind(&id)
+            .execute(&state.pool)
+            .await;
+            (StatusCode::OK, Json(json!({ "ok": true, "railway_user": who }))).into_response()
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, Json(json!({ "detail": e }))).into_response(),
     }
-
-    let _ = record_audit(
-        &state.pool,
-        "admin",
-        "railway_account_added",
-        Some(&format!("label={label} workspace={workspace}")),
-    )
-    .await;
-
-    (StatusCode::CREATED, Json(json!({ "id": id }))).into_response()
 }
 
 async fn toggle_account(

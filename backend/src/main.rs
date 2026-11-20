@@ -6,8 +6,11 @@ mod security;
 mod services;
 mod state;
 
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
+use tokio::sync::RwLock;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -65,7 +68,12 @@ async fn main() {
     });
 
     let bind_addr = config.backend_addr.clone();
-    let app = routes::build_router(AppState { pool, config }).layer(TraceLayer::new_for_http());
+    let state = AppState {
+        pool,
+        config,
+        login_jobs: Arc::new(RwLock::new(HashMap::new())),
+    };
+    let app = routes::build_router(state).layer(TraceLayer::new_for_http());
 
     let listener = TcpListener::bind(&bind_addr).await.unwrap_or_else(|err| {
         tracing::error!("Failed to bind {bind_addr}: {err}");

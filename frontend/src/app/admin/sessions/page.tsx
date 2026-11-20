@@ -58,7 +58,7 @@ export default function SessionsPage() {
         <button
           type="button"
           onClick={load}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800"
+          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-800"
         >
           <RefreshCw className="h-3.5 w-3.5" />
           Refresh
@@ -66,15 +66,15 @@ export default function SessionsPage() {
       }
     >
       {error && (
-        <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+        <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-700 dark:text-rose-300">
           {error}
         </div>
       )}
 
-      <section className="rounded-xl border border-slate-800/90 bg-[#0b1120]">
+      <section className="rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800/90 dark:bg-[#0b1120]">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="border-b border-slate-800/80 bg-slate-900/40 text-slate-400">
+            <thead className="border-b border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-800/80 dark:bg-slate-900/40 dark:text-slate-400">
               <tr>
                 <th className="px-4 py-3 font-medium">Session</th>
                 <th className="px-4 py-3 font-medium">User</th>
@@ -85,21 +85,23 @@ export default function SessionsPage() {
                 <th className="px-4 py-3 font-medium text-right">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60">
+            <tbody className="divide-y divide-slate-200 dark:divide-slate-800/60">
               {sessions.length ? (
                 sessions.map((s) => (
-                  <tr key={s.id} className="hover:bg-slate-900/30">
-                    <td className="px-4 py-3 font-mono text-slate-300">
+                  <tr key={s.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/30">
+                    <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-300">
                       {s.id.slice(0, 8)}
                     </td>
-                    <td className="px-4 py-3 font-medium text-white">
+                    <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">
                       {s.user_name}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="text-slate-200">{s.slot_project_name}</div>
+                      <div className="text-slate-800 dark:text-slate-200">
+                        {s.slot_project_name}
+                      </div>
                       {s.server_addr && s.server_port && (
                         <div className="mt-1 flex items-center gap-2">
-                          <code className="rounded bg-slate-900 px-1.5 py-0.5 text-emerald-300">
+                          <code className="rounded bg-slate-100 px-1.5 py-0.5 text-emerald-700 dark:bg-slate-900 dark:text-emerald-300">
                             {s.server_addr}:{s.server_port}
                           </code>
                           {s.status === "active" && (
@@ -111,16 +113,16 @@ export default function SessionsPage() {
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-3 font-mono text-slate-300">
+                    <td className="px-4 py-3 font-mono text-slate-700 dark:text-slate-300">
                       {s.client_local_port ?? "—"}
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={s.status} />
                     </td>
-                    <td className="px-4 py-3 text-slate-400">
+                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
                       <div>Last: {formatTime(s.last_heartbeat_at)}</div>
                       {s.ended_at && (
-                        <div className="text-[11px] text-slate-500">
+                        <div className="text-[11px] text-slate-400 dark:text-slate-500">
                           Ended: {formatTime(s.ended_at)}
                         </div>
                       )}
@@ -130,13 +132,13 @@ export default function SessionsPage() {
                         <button
                           type="button"
                           onClick={() => terminate(s.id)}
-                          className="inline-flex items-center gap-1 rounded border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-xs text-rose-300 hover:bg-rose-500/20"
+                          className="inline-flex items-center gap-1 rounded border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-xs text-rose-700 hover:bg-rose-500/20 dark:text-rose-300"
                         >
                           <XCircle className="h-3.5 w-3.5" />
                           Terminate
                         </button>
                       ) : (
-                        <span className="text-slate-500">—</span>
+                        <span className="text-slate-400">—</span>
                       )}
                     </td>
                   </tr>

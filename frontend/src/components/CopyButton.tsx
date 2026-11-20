@@ -29,11 +29,11 @@ export function CopyButton({
       type="button"
       onClick={handleCopy}
       title={`Copy: ${text}`}
-      className={`inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-xs font-medium text-slate-200 transition hover:border-emerald-500/50 hover:bg-slate-800 hover:text-emerald-300 ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:border-emerald-500/60 hover:bg-slate-50 hover:text-emerald-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:border-emerald-500/50 dark:hover:bg-slate-800 dark:hover:text-emerald-300 ${className}`}
     >
       {copied ? (
         <>
-          <Check className="h-3.5 w-3.5 text-emerald-400" />
+          <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
           <span>Copied</span>
         </>
       ) : (

@@ -7,6 +7,8 @@ pub struct RailwayAccountDto {
     pub id: String,
     pub label: String,
     pub workspace: String,
+    pub auth_mode: String,
+    pub railway_user: Option<String>,
     pub status: String,
     pub last_checked_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
