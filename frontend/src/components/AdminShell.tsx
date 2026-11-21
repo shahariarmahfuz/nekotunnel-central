@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   Activity,
+  BookOpen,
   Cloud,
   KeyRound,
   LayoutDashboard,
@@ -20,6 +21,7 @@ const NAV_ITEMS = [
   { href: "/admin/accounts", label: "Railway CLI", shortLabel: "Railway", icon: Cloud },
   { href: "/admin/users", label: "User Tokens", shortLabel: "Tokens", icon: KeyRound },
   { href: "/admin/sessions", label: "Sessions", shortLabel: "Sessions", icon: Activity },
+  { href: "/admin/docs", label: "Docs & Guide", shortLabel: "Docs", icon: BookOpen },
 ];
 
 export function AdminShell({
@@ -134,6 +136,19 @@ export function AdminShell({
             <span className="text-sm font-semibold tracking-tight">NekoTunnel</span>
           </Link>
           <div className="flex items-center gap-2">
+            <Link
+              href="/admin/docs"
+              title="Docs & User Guide"
+              aria-label="Docs & User Guide"
+              className={`inline-flex h-[34px] items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition ${
+                pathname === "/admin/docs"
+                  ? "border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-950"
+                  : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              }`}
+            >
+              <BookOpen className="h-3.5 w-3.5" />
+              <span>Docs</span>
+            </Link>
             <ThemeToggle compact />
             <button
               type="button"
@@ -176,7 +191,7 @@ export function AdminShell({
         className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-200/90 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md dark:border-zinc-800/90 dark:bg-zinc-950/95 lg:hidden"
       >
         <div className="grid grid-cols-5">
-          {NAV_ITEMS.map((item) => {
+          {NAV_ITEMS.slice(0, 5).map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href;
             return (

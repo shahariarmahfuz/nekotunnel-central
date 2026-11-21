@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import { ArrowRight, Lock, Radio } from "lucide-react";
+import { ArrowRight, BookOpen, Lock, Radio } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeProvider";
 import { Button, Input, Notice } from "@/components/ui/primitives";
 
@@ -104,6 +105,16 @@ export default function LoginPage() {
               <ArrowRight className="h-4 w-4" />
             </Button>
           </form>
+        </div>
+
+        <div className="mt-4 text-center">
+          <Link
+            href="/docs"
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 transition hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+            <span>Read User Guide &amp; CLI Docs</span>
+          </Link>
         </div>
       </div>
     </div>
