@@ -86,6 +86,7 @@ pub async fn allocate_slot(
                server_addr, server_port, frp_token_cipher, remote_port
         FROM slots
         WHERE status = 'free'
+          AND current_session_id IS NULL
           AND server_addr IS NOT NULL
           AND server_port IS NOT NULL
         ORDER BY COALESCE(last_used_at, created_at) ASC
@@ -324,6 +325,39 @@ pub async fn cleanup_stale_sessions(
         let details = format!("count={count}");
         record_audit(&mut *tx, "system", "stale_sessions_cleaned", Some(&details)).await?;
     }
+
+    // Reconcile any slot whose status drifted out of sync with active sessions
+    sqlx::query(
+        r#"
+        UPDATE slots
+        SET status = 'busy',
+            current_session_id = COALESCE(
+                current_session_id,
+                (SELECT s.id FROM sessions s WHERE s.slot_id = slots.id AND s.status = 'active' ORDER BY s.started_at DESC LIMIT 1)
+            ),
+            updated_at = NOW()
+        WHERE status <> 'busy'
+          AND EXISTS (SELECT 1 FROM sessions s WHERE s.slot_id = slots.id AND s.status = 'active')
+        "#,
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        r#"
+        UPDATE slots
+        SET current_session_id = NULL,
+            status = CASE
+                WHEN server_addr IS NOT NULL AND server_port IS NOT NULL THEN 'free'
+                ELSE 'tcp_pending'
+            END,
+            updated_at = NOW()
+        WHERE status = 'busy'
+          AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.slot_id = slots.id AND s.status = 'active')
+        "#,
+    )
+    .execute(&mut *tx)
+    .await?;
 
     tx.commit().await?;
     Ok(count)

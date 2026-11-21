@@ -1131,6 +1131,7 @@ pub async fn refresh_slot_tcp(
                 SET server_addr = $1,
                     server_port = $2,
                     status = CASE
+                        WHEN current_session_id IS NOT NULL THEN 'busy'
                         WHEN status IN ('tcp_pending', 'offline', 'failed', 'deploying') THEN 'free'
                         ELSE status
                     END,
@@ -1304,6 +1305,7 @@ pub async fn redeploy_slot_railway(
         UPDATE slots
         SET last_error = NULL,
             status = CASE
+                WHEN current_session_id IS NOT NULL THEN 'busy'
                 WHEN server_addr IS NOT NULL AND server_port IS NOT NULL THEN 'free'
                 ELSE 'tcp_pending'
             END,

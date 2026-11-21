@@ -104,6 +104,7 @@ pub struct AuditLogDto {
 pub struct OverviewCounts {
     pub accounts: i64,
     pub users: i64,
+    pub total_slots: i64,
     pub free_slots: i64,
     pub busy_slots: i64,
     pub pending_slots: i64,

@@ -190,6 +190,10 @@ async fn admin_overview(State(state): State<AppState>, headers: HeaderMap) -> im
         .fetch_one(&state.pool)
         .await
         .unwrap_or(0);
+    let total_slots = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM slots")
+        .fetch_one(&state.pool)
+        .await
+        .unwrap_or(0);
     let free_slots = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM slots WHERE status = 'free'")
         .fetch_one(&state.pool)
         .await
@@ -231,6 +235,7 @@ async fn admin_overview(State(state): State<AppState>, headers: HeaderMap) -> im
     let counts = OverviewCounts {
         accounts,
         users,
+        total_slots,
         free_slots,
         busy_slots,
         pending_slots,

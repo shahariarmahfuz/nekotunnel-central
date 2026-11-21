@@ -11,6 +11,7 @@ type OverviewResponse = {
   counts: {
     accounts: number;
     users: number;
+    total_slots: number;
     free_slots: number;
     busy_slots: number;
     pending_slots: number;
@@ -77,21 +78,34 @@ export default function AdminOverviewPage() {
       )}
 
       {/* Primary KPIs */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 dark:border-zinc-800/80 dark:bg-zinc-900/50">
+          <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+            <span>Total Slots</span>
+            <Server className="h-3.5 w-3.5" />
+          </div>
+          <div className="mt-2 text-2xl font-semibold tracking-tight tabular-nums">
+            {data ? data.counts.total_slots : "—"}
+          </div>
+        </div>
+
         <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 dark:border-zinc-800/80 dark:bg-zinc-900/50">
           <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
             <span>Free Slots</span>
-            <Server className="h-3.5 w-3.5" />
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
           </div>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-semibold tracking-tight tabular-nums">
-              {data ? data.counts.free_slots : "—"}
-            </span>
-            {data && data.counts.busy_slots > 0 && (
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                {data.counts.busy_slots} busy
-              </span>
-            )}
+          <div className="mt-2 text-2xl font-semibold tracking-tight tabular-nums text-emerald-700 dark:text-emerald-400">
+            {data ? data.counts.free_slots : "—"}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 dark:border-zinc-800/80 dark:bg-zinc-900/50">
+          <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+            <span>Busy Slots</span>
+            <span className="h-2 w-2 rounded-full bg-sky-500" />
+          </div>
+          <div className="mt-2 text-2xl font-semibold tracking-tight tabular-nums text-sky-700 dark:text-sky-400">
+            {data ? data.counts.busy_slots : "—"}
           </div>
         </div>
 
@@ -107,7 +121,7 @@ export default function AdminOverviewPage() {
 
         <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 dark:border-zinc-800/80 dark:bg-zinc-900/50">
           <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
-            <span>Railway Accounts</span>
+            <span>Railway</span>
             <Cloud className="h-3.5 w-3.5" />
           </div>
           <div className="mt-2 text-2xl font-semibold tracking-tight tabular-nums">
